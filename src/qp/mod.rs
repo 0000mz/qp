@@ -8,17 +8,14 @@ use iced::{Color, Element, Length, Rectangle, Size};
 pub struct CodeSpace<'a> {
     width: f32,
     height: f32,
-    // TODO: remove text.
-    text: String,
     buffer_iter: BufferContentIterator<'a>,
 }
 
 impl<'a> CodeSpace<'a> {
-    pub fn new(width: f32, height: f32, buffer_iter: BufferContentIterator<'a>) -> Self {
+    fn new(width: f32, height: f32, buffer_iter: BufferContentIterator<'a>) -> Self {
         CodeSpace {
             width,
             height,
-            text: String::from("placeholder"),
             buffer_iter,
         }
     }
@@ -105,7 +102,7 @@ where
                         bounds: debug_bounds,
                         ..renderer::Quad::default()
                     },
-                    Color::BLACK, // Color::from_rgb(1.0, 0.0, 0.0),
+                    Color::from_rgb(1.0, 0.0, 0.0),
                 );
             }
             renderer.fill_text(
@@ -334,11 +331,6 @@ impl BufferContent {
             BufferContentIterator::new(self),
         ))
         .into()
-        // let mut c = iced::widget::column![];
-        // for line in self.data.iter() {
-        //     c = c.push(iced::widget::text(line));
-        // }
-        // c.into()
     }
 }
 
