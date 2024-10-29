@@ -12,6 +12,10 @@ pub struct CodeSpace<'a> {
 }
 
 impl<'a> CodeSpace<'a> {
+    const CELL_WIDTH: usize = 10;
+    const CELL_HEIGHT: usize = 14;
+    const TEXT_SIZE: usize = 14;
+
     fn new(width: f32, height: f32, buffer_iter: BufferContentIterator<'a>) -> Self {
         CodeSpace {
             width,
@@ -24,10 +28,10 @@ impl<'a> CodeSpace<'a> {
         iced::advanced::Text {
             content: String::from(c),
             bounds: Size {
-                width: 10.0,
-                height: 10.0,
+                width: CodeSpace::CELL_WIDTH as f32,
+                height: CodeSpace::CELL_HEIGHT as f32,
             },
-            size: iced::Pixels(10.0),
+            size: iced::Pixels(CodeSpace::TEXT_SIZE as f32),
             line_height: iced::advanced::text::LineHeight::default(),
             font: iced::Font::MONOSPACE,
             horizontal_alignment: iced::Center.into(),
@@ -35,6 +39,39 @@ impl<'a> CodeSpace<'a> {
             shaping: iced::advanced::text::Shaping::Basic,
             wrapping: iced::advanced::text::Wrapping::None,
         }
+    }
+
+    fn cell_to_pixel_space(row: usize, col: usize) -> (f32, f32) {
+        let x: f32 = (col as f32) * (CodeSpace::CELL_WIDTH as f32);
+        let y: f32 = (row as f32) * (CodeSpace::CELL_HEIGHT as f32);
+        (x, y)
+    }
+
+    fn draw_char_cell<Renderer: iced::advanced::text::Renderer<Font = iced::Font>>(
+        &self,
+        renderer: &mut Renderer,
+        row: usize,
+        col: usize,
+        c: char,
+    ) {
+        let (x, y) = CodeSpace::cell_to_pixel_space(row, col);
+        let cellw: f32 = CodeSpace::CELL_WIDTH as f32;
+        let cellh: f32 = CodeSpace::CELL_HEIGHT as f32;
+        let bounds = Rectangle {
+            x,
+            y,
+            width: cellw,
+            height: cellh,
+        };
+        renderer.fill_text(
+            CodeSpace::make_text(c),
+            iced::Point {
+                x: x + ((CodeSpace::CELL_WIDTH as f32) / 2.0),
+                y: y + ((CodeSpace::CELL_HEIGHT as f32) / 2.0),
+            },
+            Color::WHITE,
+            bounds,
+        );
     }
 }
 
@@ -73,20 +110,45 @@ where
                 bounds: layout.bounds(),
                 ..renderer::Quad::default()
             },
-            Color::BLACK,
+            Color::from_rgb(0.0, 0.0, 0.0), // Color::BLACK,
         );
 
+        let cellw: f32 = CodeSpace::CELL_WIDTH as f32;
+        let cellh: f32 = CodeSpace::CELL_HEIGHT as f32;
+
+        // Draw the line numbers.
+        let nb_digits: usize = 3;
+        let nb_lines: usize = (self.height / cellh) as usize;
+        for curr_line in 0..nb_lines {
+            let mut l = curr_line;
+            let mut digits = nb_digits;
+            while l > 0 {
+                let base_10_n = l % 10;
+                self.draw_char_cell(
+                    renderer,
+                    curr_line - 1,
+                    digits - 1,
+                    char::from_u32((48 + base_10_n) as u32).unwrap(),
+                );
+                l /= 10;
+                digits -= 1;
+            }
+            while digits > 0 {
+                self.draw_char_cell(renderer, curr_line, digits - 1, ' ');
+                digits -= 1;
+            }
+        }
+
         for cell in self.buffer_iter.into_iter() {
-            let width: f32 = 6.0;
-            let height: f32 = 14.0;
-            let x: f32 = (cell.col as f32) * width;
-            let y: f32 = (cell.row as f32) * height;
+            let col = (cell.col + (nb_digits as u32) + 1) as usize;
+            let row = cell.row as usize;
+            let (x, y) = CodeSpace::cell_to_pixel_space(row, col);
 
             let bounds = Rectangle {
                 x,
                 y,
-                width,
-                height,
+                width: cellw,
+                height: cellh,
             };
             {
                 const SPACING: f32 = 1.0;
@@ -102,18 +164,10 @@ where
                         bounds: debug_bounds,
                         ..renderer::Quad::default()
                     },
-                    Color::from_rgb(1.0, 0.0, 0.0),
+                    Color::from_rgb(0.5, 0.0, 0.0),
                 );
             }
-            renderer.fill_text(
-                CodeSpace::make_text(cell.c),
-                iced::Point {
-                    x: x + (width / 2.0),
-                    y: y + (height / 2.0),
-                },
-                Color::WHITE,
-                bounds,
-            );
+            self.draw_char_cell(renderer, row, col, cell.c);
         }
     }
 }
