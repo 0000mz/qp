@@ -5,6 +5,19 @@ use iced::advanced::widget::Widget;
 use iced::mouse;
 use iced::{Color, Element, Length, Rectangle, Size};
 
+trait Component<Message> {
+    fn handle_key_event(
+        &self,
+        key: iced::keyboard::Key,
+        modified_key: iced::keyboard::Key,
+        modifiers: iced::keyboard::Modifiers,
+    ) -> Option<Message>;
+
+    fn update(&mut self, message: Message) -> iced::Task<Message>;
+
+    fn view(&self) -> iced::Element<'_, EditorMessage>;
+}
+
 pub struct CodeSpace<'a> {
     width: f32,
     height: f32,
@@ -193,11 +206,12 @@ impl std::fmt::Display for Cursor {
 struct BufferContent {
     data: Vec<String>,
     cursor: Cursor,
+    size: iced::Size,
 }
 
 // TODO: Rename this to BufferMessage
 #[derive(Debug, Clone, Copy)]
-enum BufferMessage<AsciiCode = u8> {
+pub enum BufferMessage<AsciiCode = u8> {
     AddCharacter(AsciiCode),
     RemoveCharacter,
     CommitAction(iced::keyboard::key::Named),
@@ -258,25 +272,7 @@ impl Iterator for BufferContentIterator<'_> {
     }
 }
 
-impl BufferContent {
-    fn new() -> Self {
-        BufferContent {
-            data: vec![String::new()],
-            cursor: Cursor(0, 0),
-        }
-    }
-
-    fn char_at(&self, row: usize, col: usize) -> Option<char> {
-        if row >= self.data.len() {
-            return None;
-        }
-        let line: &String = &self.data[row];
-        if col >= line.len() {
-            return None;
-        }
-        line.chars().nth(col)
-    }
-
+impl Component<BufferMessage> for BufferContent {
     fn handle_key_event(
         &self,
         key: iced::keyboard::Key,
@@ -290,15 +286,6 @@ impl BufferContent {
             modifier_enum = Some(KeyModifier::CTRL);
         }
         BufferContent::handle_keypress(key, modified_key, modifier_enum)
-    }
-
-    fn ensure_cursor(&mut self) {
-        let Cursor(row_i, col_i) = self.cursor;
-        if self.data.len() == 0 {
-            self.data.push(String::new());
-        }
-        let new_row_i = std::cmp::min(row_i, self.data.len() - 1);
-        self.cursor = Cursor(new_row_i, col_i);
     }
 
     fn update(&mut self, message: BufferMessage) -> iced::Task<BufferMessage> {
@@ -347,6 +334,45 @@ impl BufferContent {
         iced::Task::none()
     }
 
+    fn view(&self) -> iced::Element<'_, EditorMessage> {
+        iced::widget::container(CodeSpace::new(
+            self.size.width,
+            self.size.height,
+            BufferContentIterator::new(self),
+        ))
+        .into()
+    }
+}
+
+impl BufferContent {
+    fn new(size: iced::Size) -> Self {
+        BufferContent {
+            data: vec![String::new()],
+            cursor: Cursor(0, 0),
+            size,
+        }
+    }
+
+    fn char_at(&self, row: usize, col: usize) -> Option<char> {
+        if row >= self.data.len() {
+            return None;
+        }
+        let line: &String = &self.data[row];
+        if col >= line.len() {
+            return None;
+        }
+        line.chars().nth(col)
+    }
+
+    fn ensure_cursor(&mut self) {
+        let Cursor(row_i, col_i) = self.cursor;
+        if self.data.len() == 0 {
+            self.data.push(String::new());
+        }
+        let new_row_i = std::cmp::min(row_i, self.data.len() - 1);
+        self.cursor = Cursor(new_row_i, col_i);
+    }
+
     fn handle_ascii_keypress(key: char, modifier: Option<KeyModifier>) -> Option<BufferMessage> {
         match (key, modifier) {
             (ch, None) => Some(BufferMessage::AddCharacter(ch as u8)),
@@ -392,44 +418,76 @@ impl BufferContent {
             _ => None,
         }
     }
+}
+
+struct Panel {
+    buffer: BufferContent,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PanelMessage {
+    ProcessBufferEvent(BufferMessage),
+}
+
+impl Panel {
+    fn new(size: iced::Size) -> Self {
+        Panel {
+            buffer: BufferContent::new(size),
+        }
+    }
+}
+
+impl Component<PanelMessage> for Panel {
+    fn handle_key_event(
+        &self,
+        key: iced::keyboard::Key,
+        modified_key: iced::keyboard::Key,
+        modifiers: iced::keyboard::Modifiers,
+    ) -> Option<PanelMessage> {
+        match self.buffer.handle_key_event(key, modified_key, modifiers) {
+            Some(buffer_msg) => Some(PanelMessage::ProcessBufferEvent(buffer_msg)),
+            _ => None,
+        }
+    }
+
+    fn update(&mut self, message: PanelMessage) -> iced::Task<PanelMessage> {
+        match message {
+            PanelMessage::ProcessBufferEvent(buffer_message) => self
+                .buffer
+                .update(buffer_message)
+                .map(|panel_response| PanelMessage::ProcessBufferEvent(panel_response)),
+        }
+    }
 
     fn view(&self) -> iced::Element<'_, EditorMessage> {
-        let width: f32 = 1000.0;
-        let height: f32 = 800.0;
-
-        iced::widget::container(CodeSpace::new(
-            width,
-            height,
-            BufferContentIterator::new(self),
-        ))
-        .into()
+        self.buffer.view()
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum EditorMessage<Key = iced::keyboard::Key, Modifier = iced::keyboard::Modifiers> {
     // Open an empty buffer in the editor.
-    OpenBuffer,
+    OpenPanel(iced::Size),
     HandleKeys(Key, Key, Modifier),
-    ProcessBufferEvent(BufferMessage),
+    ProcessPanelEvent(PanelMessage),
 }
 
 pub struct EditorApp {
-    buffers: Vec<BufferContent>,
-    active_buffer: Option<usize>,
+    panels: Vec<Panel>,
+    active_panel: Option<usize>,
 }
 
 impl EditorApp {
     pub fn new() -> Self {
         EditorApp {
-            buffers: vec![],
-            active_buffer: None,
+            panels: vec![],
+            active_panel: None,
         }
     }
 
     pub fn view(&self) -> iced::Element<'_, EditorMessage> {
-        if let Some(buffer_idx) = self.active_buffer {
-            self.buffers[buffer_idx].view().into()
+        if let Some(buffer_idx) = self.active_panel {
+            self.panels[buffer_idx].view().into()
         } else {
             iced::widget::text("editor").into()
         }
@@ -443,21 +501,21 @@ impl EditorApp {
 
     pub fn update(&mut self, message: EditorMessage) -> iced::Task<EditorMessage> {
         match message {
-            EditorMessage::OpenBuffer => {
-                self.buffers.push(BufferContent::new());
-                if let None = self.active_buffer {
-                    self.active_buffer = Some(self.buffers.len() - 1);
+            EditorMessage::OpenPanel(size) => {
+                self.panels.push(Panel::new(size));
+                if let None = self.active_panel {
+                    self.active_panel = Some(self.panels.len() - 1);
                 }
                 iced::Task::none()
             }
             EditorMessage::HandleKeys(key, modified_key, modifier) => {
-                if let Some(buffer_idx) = self.active_buffer {
-                    match self.buffers[buffer_idx].handle_key_event(key, modified_key, modifier) {
+                if let Some(buffer_idx) = self.active_panel {
+                    match self.panels[buffer_idx].handle_key_event(key, modified_key, modifier) {
                         Some(msg) => {
                             return iced::Task::done(EditorMessage::<
                                 iced::keyboard::Key,
                                 iced::keyboard::Modifiers,
-                            >::ProcessBufferEvent(
+                            >::ProcessPanelEvent(
                                 msg
                             ));
                         }
@@ -466,11 +524,11 @@ impl EditorApp {
                 }
                 return iced::Task::none();
             }
-            EditorMessage::ProcessBufferEvent(buffer_message) => {
-                if let Some(buffer_idx) = self.active_buffer {
-                    self.buffers[buffer_idx]
-                        .update(buffer_message)
-                        .map(|buffer_resp| EditorMessage::<iced::keyboard::Key, iced::keyboard::Modifiers>::ProcessBufferEvent(buffer_resp))
+            EditorMessage::ProcessPanelEvent(panel_message) => {
+                if let Some(panel_idx) = self.active_panel {
+                    self.panels[panel_idx]
+                        .update(panel_message)
+                        .map(|panel_response| EditorMessage::<iced::keyboard::Key, iced::keyboard::Modifiers>::ProcessPanelEvent(panel_response))
                 } else {
                     iced::Task::none()
                 }
