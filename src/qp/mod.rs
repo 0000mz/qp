@@ -6,6 +6,10 @@ use iced::mouse;
 use iced::{Color, Element, Length, Rectangle, Size};
 
 trait Component<Message> {
+    // TODO: Similar to how the iced renderer is able to section out parts of
+    // the trait functions based on what type of renderer it is, section out
+    // this component based on which one can do what. i.e. which components
+    // process key events and so on.
     fn handle_key_event(
         &self,
         key: iced::keyboard::Key,
@@ -123,7 +127,7 @@ where
                 bounds: layout.bounds(),
                 ..renderer::Quad::default()
             },
-            Color::from_rgb(0.0, 0.0, 0.0), // Color::BLACK,
+            Color::from_rgb(0.2, 0.2, 0.2),
         );
 
         let cellw: f32 = CodeSpace::CELL_WIDTH as f32;
@@ -131,7 +135,7 @@ where
 
         // Draw the line numbers.
         let nb_digits: usize = 3;
-        let nb_lines: usize = (self.height / cellh) as usize;
+        let nb_lines: usize = ((self.height / cellh) as usize) + 1;
         for curr_line in 0..nb_lines {
             let mut l = curr_line;
             let mut digits = nb_digits;
@@ -420,8 +424,44 @@ impl BufferContent {
     }
 }
 
+struct PanelStatusLine {
+    bounds: Rectangle,
+}
+
+impl PanelStatusLine {
+    fn new(bounds: Rectangle) -> Self {
+        PanelStatusLine { bounds }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PanelStatusLineMesage {}
+
+impl Component<PanelStatusLineMesage> for PanelStatusLine {
+    fn handle_key_event(
+        &self,
+        _key: iced::keyboard::Key,
+        _modified_key: iced::keyboard::Key,
+        _modifiers: iced::keyboard::Modifiers,
+    ) -> Option<PanelStatusLineMesage> {
+        None
+    }
+
+    fn update(&mut self, _message: PanelStatusLineMesage) -> iced::Task<PanelStatusLineMesage> {
+        iced::Task::none()
+    }
+
+    fn view(&self) -> iced::Element<'_, EditorMessage> {
+        iced::widget::container("Mode: Insert")
+            .width(self.bounds.width)
+            .height(self.bounds.height)
+            .into()
+    }
+}
+
 struct Panel {
     buffer: BufferContent,
+    status_line: PanelStatusLine,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -431,8 +471,20 @@ pub enum PanelMessage {
 
 impl Panel {
     fn new(size: iced::Size) -> Self {
+        let status_line_height = 20.0;
+        let buffer_size = iced::Size {
+            height: size.height - status_line_height,
+            ..size
+        };
+        let status_line_bounds = Rectangle {
+            x: 0.0,
+            y: buffer_size.height,
+            width: size.width,
+            height: status_line_height,
+        };
         Panel {
-            buffer: BufferContent::new(size),
+            buffer: BufferContent::new(buffer_size),
+            status_line: PanelStatusLine::new(status_line_bounds),
         }
     }
 }
@@ -460,7 +512,7 @@ impl Component<PanelMessage> for Panel {
     }
 
     fn view(&self) -> iced::Element<'_, EditorMessage> {
-        self.buffer.view()
+        iced::widget::column![self.buffer.view(), self.status_line.view()].into()
     }
 }
 
