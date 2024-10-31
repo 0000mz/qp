@@ -184,6 +184,12 @@ where
 #[derive(Debug)]
 struct Cursor(usize, usize);
 
+impl std::fmt::Display for Cursor {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Cursor (row: {}, col: {})", self.0, self.1)
+    }
+}
+
 struct BufferContent {
     data: Vec<String>,
     cursor: Cursor,
@@ -234,13 +240,8 @@ impl Iterator for BufferContentIterator<'_> {
             loop {
                 let ch = self.dev_box_ref.char_at(self.row, self.col);
                 if ch.is_none() {
-                    if self.col == 0 {
-                        // No more data left. The first cell in this row is empty.
-                        return None;
-                    } else {
-                        self.col = 0;
-                        break;
-                    }
+                    self.col = 0;
+                    break;
                 }
                 self.col += 1;
                 return Some(BufferContentCellInfo {
@@ -249,7 +250,10 @@ impl Iterator for BufferContentIterator<'_> {
                     c: ch.unwrap(),
                 });
             }
-            self.row += 1
+            self.row += 1;
+            if self.row >= self.dev_box_ref.data.len() {
+                return None;
+            }
         }
     }
 }
@@ -300,6 +304,7 @@ impl BufferContent {
     fn update(&mut self, message: BufferMessage) -> iced::Task<BufferMessage> {
         match message {
             BufferMessage::AddCharacter(ascii_code) => {
+                println!("-> Adding character: {}", ascii_code);
                 let Cursor(row_i, col_i) = self.cursor;
                 self.ensure_cursor();
 
@@ -334,6 +339,7 @@ impl BufferContent {
 
                     self.data = new_data;
                     self.cursor = Cursor(row_i + 1, 0);
+                    println!("DBG Updated cursor row: {}", self.cursor);
                 }
                 _ => {}
             },
