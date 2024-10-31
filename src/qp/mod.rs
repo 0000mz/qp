@@ -197,6 +197,7 @@ enum BufferMessage<AsciiCode = u8> {
     CommitAction(iced::keyboard::key::Named),
 }
 
+#[derive(Debug)]
 enum KeyModifier {
     SHIFT,
     CTRL,
@@ -275,6 +276,7 @@ impl BufferContent {
     fn handle_key_event(
         &self,
         key: iced::keyboard::Key,
+        modified_key: iced::keyboard::Key,
         modifiers: iced::keyboard::Modifiers,
     ) -> Option<BufferMessage> {
         let mut modifier_enum: Option<KeyModifier> = None;
@@ -283,7 +285,7 @@ impl BufferContent {
         } else if modifiers.control() {
             modifier_enum = Some(KeyModifier::CTRL);
         }
-        BufferContent::handle_keypress(key, modifier_enum)
+        BufferContent::handle_keypress(key, modified_key, modifier_enum)
     }
 
     fn ensure_cursor(&mut self) {
@@ -345,8 +347,10 @@ impl BufferContent {
             (ch, Some(KeyModifier::SHIFT)) => {
                 let ascii_code = ch as u8;
                 if ascii_code < 97 || ascii_code > 122 {
-                    None
+                    // add non-alphabet characters as is.
+                    Some(BufferMessage::AddCharacter(ascii_code))
                 } else {
+                    // else, capitalize the alphabet character..
                     Some(BufferMessage::AddCharacter(ascii_code - 32))
                 }
             }
@@ -356,21 +360,29 @@ impl BufferContent {
 
     fn handle_keypress(
         key: iced::keyboard::Key,
+        modified_key: iced::keyboard::Key,
         modifier: Option<KeyModifier>,
     ) -> Option<BufferMessage> {
-        match (key, modifier) {
-            (iced::keyboard::Key::Character(c), m) => {
+        match (key, modified_key, modifier) {
+            (_, iced::keyboard::Key::Character(c), m) => {
+                // TODO: Lock the debug logs behind some flag.
+                println!("DBG Handle character: {:?} {:?}", c, m);
                 let chars = c.chars().next().unwrap();
                 BufferContent::handle_ascii_keypress(chars.to_ascii_lowercase(), m)
             }
-            (iced::keyboard::Key::Named(named), _) => match named {
-                iced::keyboard::key::Named::Backspace => Some(BufferMessage::RemoveCharacter),
-                iced::keyboard::key::Named::Enter => Some(BufferMessage::CommitAction(
-                    iced::keyboard::key::Named::Enter,
-                )),
-                iced::keyboard::key::Named::Space => Some(BufferMessage::AddCharacter(' ' as u8)),
-                _ => None,
-            },
+            (iced::keyboard::Key::Named(named), _, _) => {
+                println!("DBG Handle named: {:?}", named);
+                match named {
+                    iced::keyboard::key::Named::Backspace => Some(BufferMessage::RemoveCharacter),
+                    iced::keyboard::key::Named::Enter => Some(BufferMessage::CommitAction(
+                        iced::keyboard::key::Named::Enter,
+                    )),
+                    iced::keyboard::key::Named::Space => {
+                        Some(BufferMessage::AddCharacter(' ' as u8))
+                    }
+                    _ => None,
+                }
+            }
             _ => None,
         }
     }
@@ -392,7 +404,7 @@ impl BufferContent {
 pub enum EditorMessage<Key = iced::keyboard::Key, Modifier = iced::keyboard::Modifiers> {
     // Open an empty buffer in the editor.
     OpenBuffer,
-    HandleKeys(Key, Modifier),
+    HandleKeys(Key, Key, Modifier),
     ProcessBufferEvent(BufferMessage),
 }
 
@@ -418,8 +430,8 @@ impl EditorApp {
     }
 
     pub fn subscription(&self) -> iced::Subscription<EditorMessage> {
-        iced::keyboard::on_key_press(|key, modifiers| {
-            Some(EditorMessage::HandleKeys(key, modifiers))
+        iced::keyboard::on_key_press_ext(|key, modified_key, modifiers| {
+            Some(EditorMessage::HandleKeys(key, modified_key, modifiers))
         })
     }
 
@@ -432,9 +444,9 @@ impl EditorApp {
                 }
                 iced::Task::none()
             }
-            EditorMessage::HandleKeys(key, modifier) => {
+            EditorMessage::HandleKeys(key, modified_key, modifier) => {
                 if let Some(buffer_idx) = self.active_buffer {
-                    match self.buffers[buffer_idx].handle_key_event(key, modifier) {
+                    match self.buffers[buffer_idx].handle_key_event(key, modified_key, modifier) {
                         Some(msg) => {
                             return iced::Task::done(EditorMessage::<
                                 iced::keyboard::Key,

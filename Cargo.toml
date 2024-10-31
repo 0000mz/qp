@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 iced = { version = "0.13.1", features = ["advanced"] }
+
+[patch.crates-io]
+iced = { git = "https://github.com/0000mz/iced.git", branch = "0.13-modified" }
