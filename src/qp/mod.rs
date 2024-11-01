@@ -22,6 +22,125 @@ trait Component<Message> {
     fn view(&self) -> iced::Element<'_, EditorMessage>;
 }
 
+struct GridSpaceUtil {}
+impl GridSpaceUtil {
+    const CELL_WIDTH: usize = 10;
+    const CELL_HEIGHT: usize = 14;
+    const TEXT_SIZE: usize = 14;
+
+    fn cell_to_pixel_space(row: usize, col: usize) -> (f32, f32) {
+        let x: f32 = (col as f32) * (GridSpaceUtil::CELL_WIDTH as f32);
+        let y: f32 = (row as f32) * (GridSpaceUtil::CELL_HEIGHT as f32);
+        (x, y)
+    }
+}
+
+pub struct StatusLineRender {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    command: String,
+}
+
+impl StatusLineRender {
+    fn new(x: f32, y: f32, width: f32, height: f32, command: String) -> Self {
+        StatusLineRender {
+            x,
+            y,
+            width,
+            height,
+            command,
+        }
+    }
+}
+
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for StatusLineRender
+where
+    Renderer: renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font>,
+{
+    fn size(&self) -> Size<iced::Length> {
+        Size {
+            width: Length::Shrink,
+            height: Length::Shrink,
+        }
+    }
+
+    fn layout(
+        &self,
+        _tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::Node::new(Size::new(self.width, self.height))
+    }
+
+    fn draw(
+        &self,
+        _state: &Tree,
+        renderer: &mut Renderer,
+        _theme: &Theme,
+        _stype: &renderer::Style,
+        _layout: layout::Layout<'_>,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+        let bounds = Rectangle {
+            x: self.x,
+            y: self.y,
+            width: self.width,
+            height: self.height,
+        };
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds,
+                ..renderer::Quad::default()
+            },
+            Color::from_rgb(0.0, 0.0, 0.5),
+        );
+
+        let mode_str = if self.command.len() == 0 {
+            String::from("NORMAL")
+        } else {
+            self.command.clone()
+        };
+        let mode_str_len = mode_str.len();
+        let mode_text = iced::advanced::Text {
+            content: mode_str,
+            bounds: Size {
+                width: (GridSpaceUtil::CELL_WIDTH * mode_str_len) as f32,
+                height: GridSpaceUtil::CELL_HEIGHT as f32,
+            },
+            size: iced::Pixels(GridSpaceUtil::TEXT_SIZE as f32),
+            line_height: iced::advanced::text::LineHeight::default(),
+            font: iced::Font::MONOSPACE,
+            horizontal_alignment: iced::Left,
+            vertical_alignment: iced::Top,
+            shaping: iced::advanced::text::Shaping::Basic,
+            wrapping: iced::advanced::text::Wrapping::None,
+        };
+
+        renderer.fill_text(
+            mode_text,
+            iced::Point {
+                x: self.x,
+                y: self.y,
+            },
+            Color::WHITE,
+            bounds,
+        );
+    }
+}
+
+impl<'a, Message, Theme, Renderer> From<StatusLineRender> for Element<'a, Message, Theme, Renderer>
+where
+    Renderer: renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font>,
+{
+    fn from(el: StatusLineRender) -> Self {
+        Self::new(el)
+    }
+}
+
 pub struct CodeSpace<'a> {
     width: f32,
     height: f32,
@@ -30,9 +149,6 @@ pub struct CodeSpace<'a> {
 }
 
 impl<'a> CodeSpace<'a> {
-    const CELL_WIDTH: usize = 10;
-    const CELL_HEIGHT: usize = 14;
-    const TEXT_SIZE: usize = 14;
     // The number of columns that should be allocated for the number line.
     const LINE_NB_DIGITS: usize = 3;
 
@@ -54,10 +170,10 @@ impl<'a> CodeSpace<'a> {
         iced::advanced::Text {
             content: String::from(c),
             bounds: Size {
-                width: CodeSpace::CELL_WIDTH as f32,
-                height: CodeSpace::CELL_HEIGHT as f32,
+                width: GridSpaceUtil::CELL_WIDTH as f32,
+                height: GridSpaceUtil::CELL_HEIGHT as f32,
             },
-            size: iced::Pixels(CodeSpace::TEXT_SIZE as f32),
+            size: iced::Pixels(GridSpaceUtil::TEXT_SIZE as f32),
             line_height: iced::advanced::text::LineHeight::default(),
             font: iced::Font::MONOSPACE,
             horizontal_alignment: iced::Center.into(),
@@ -67,12 +183,6 @@ impl<'a> CodeSpace<'a> {
         }
     }
 
-    fn cell_to_pixel_space(row: usize, col: usize) -> (f32, f32) {
-        let x: f32 = (col as f32) * (CodeSpace::CELL_WIDTH as f32);
-        let y: f32 = (row as f32) * (CodeSpace::CELL_HEIGHT as f32);
-        (x, y)
-    }
-
     fn draw_char_cell<Renderer: iced::advanced::text::Renderer<Font = iced::Font>>(
         &self,
         renderer: &mut Renderer,
@@ -80,9 +190,9 @@ impl<'a> CodeSpace<'a> {
         col: usize,
         c: char,
     ) {
-        let (x, y) = CodeSpace::cell_to_pixel_space(row, col);
-        let cellw: f32 = CodeSpace::CELL_WIDTH as f32;
-        let cellh: f32 = CodeSpace::CELL_HEIGHT as f32;
+        let (x, y) = GridSpaceUtil::cell_to_pixel_space(row, col);
+        let cellw: f32 = GridSpaceUtil::CELL_WIDTH as f32;
+        let cellh: f32 = GridSpaceUtil::CELL_HEIGHT as f32;
         let bounds = Rectangle {
             x,
             y,
@@ -92,8 +202,8 @@ impl<'a> CodeSpace<'a> {
         renderer.fill_text(
             CodeSpace::make_text(c),
             iced::Point {
-                x: x + ((CodeSpace::CELL_WIDTH as f32) / 2.0),
-                y: y + ((CodeSpace::CELL_HEIGHT as f32) / 2.0),
+                x: x + ((GridSpaceUtil::CELL_WIDTH as f32) / 2.0),
+                y: y + ((GridSpaceUtil::CELL_HEIGHT as f32) / 2.0),
             },
             Color::WHITE,
             bounds,
@@ -147,8 +257,8 @@ where
             Color::from_rgb(0.2, 0.2, 0.2),
         );
 
-        let cellw: f32 = CodeSpace::CELL_WIDTH as f32;
-        let cellh: f32 = CodeSpace::CELL_HEIGHT as f32;
+        let cellw: f32 = GridSpaceUtil::CELL_WIDTH as f32;
+        let cellh: f32 = GridSpaceUtil::CELL_HEIGHT as f32;
 
         // Draw the line numbers.
         let nb_lines: usize = ((self.height / cellh) as usize) + 1;
@@ -174,7 +284,7 @@ where
 
         for cell in self.buffer_iter.into_iter() {
             let (row, col) = CodeSpace::nb_ofsetted_row_cols(cell.row as usize, cell.col as usize);
-            let (x, y) = CodeSpace::cell_to_pixel_space(row, col);
+            let (x, y) = GridSpaceUtil::cell_to_pixel_space(row, col);
 
             let bounds = Rectangle {
                 x,
@@ -205,7 +315,7 @@ where
         // Draw the cursor
         {
             let (row, col) = CodeSpace::nb_ofsetted_row_cols(self.cursor.row, self.cursor.col);
-            let (cursor_x, cursor_y) = CodeSpace::cell_to_pixel_space(row, col);
+            let (cursor_x, cursor_y) = GridSpaceUtil::cell_to_pixel_space(row, col);
             let cursor_bounds = Rectangle {
                 x: cursor_x,
                 y: cursor_y,
@@ -250,7 +360,6 @@ struct BufferContent {
     size: iced::Size,
 }
 
-// TODO: Rename this to BufferMessage
 #[derive(Debug, Clone, Copy)]
 pub enum BufferMessage<AsciiCode = u8> {
     AddCharacter(AsciiCode),
@@ -444,9 +553,7 @@ impl BufferContent {
                 println!("DBG Handle named: {:?}", named);
                 match named {
                     iced::keyboard::key::Named::Backspace => Some(BufferMessage::RemoveCharacter),
-                    iced::keyboard::key::Named::Enter => Some(BufferMessage::CommitAction(
-                        iced::keyboard::key::Named::Enter,
-                    )),
+                    e @ iced::keyboard::key::Named::Enter => Some(BufferMessage::CommitAction(e)),
                     iced::keyboard::key::Named::Space => {
                         Some(BufferMessage::AddCharacter(' ' as u8))
                     }
@@ -460,47 +567,79 @@ impl BufferContent {
 
 struct PanelStatusLine {
     bounds: Rectangle,
+    current_command: String,
 }
 
 impl PanelStatusLine {
     fn new(bounds: Rectangle) -> Self {
-        PanelStatusLine { bounds }
+        PanelStatusLine {
+            bounds,
+            current_command: String::new(),
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum PanelStatusLineMesage {}
+pub enum PanelStatusLineMessage {
+    ProcessKeyInput(char),
+}
 
-impl Component<PanelStatusLineMesage> for PanelStatusLine {
+impl Component<PanelStatusLineMessage> for PanelStatusLine {
     fn handle_key_event(
         &self,
         _key: iced::keyboard::Key,
-        _modified_key: iced::keyboard::Key,
+        modified_key: iced::keyboard::Key,
         _modifiers: iced::keyboard::Modifiers,
-    ) -> Option<PanelStatusLineMesage> {
-        None
+    ) -> Option<PanelStatusLineMessage> {
+        if let iced::keyboard::Key::Character(c) = modified_key {
+            let ch = c.chars().nth(0).unwrap();
+            Some(PanelStatusLineMessage::ProcessKeyInput(ch))
+        } else {
+            None
+        }
     }
 
-    fn update(&mut self, _message: PanelStatusLineMesage) -> iced::Task<PanelStatusLineMesage> {
-        iced::Task::none()
+    fn update(&mut self, message: PanelStatusLineMessage) -> iced::Task<PanelStatusLineMessage> {
+        match message {
+            PanelStatusLineMessage::ProcessKeyInput(c) => {
+                self.current_command.push(c);
+                iced::Task::none()
+            }
+        }
     }
 
     fn view(&self) -> iced::Element<'_, EditorMessage> {
-        iced::widget::container("Mode: Insert")
-            .width(self.bounds.width)
-            .height(self.bounds.height)
-            .into()
+        StatusLineRender::new(
+            self.bounds.x,
+            self.bounds.y,
+            self.bounds.width,
+            self.bounds.height,
+            // TODO: Pass by reference.
+            self.current_command.clone(),
+        )
+        .into()
     }
 }
 
 struct Panel {
     buffer: BufferContent,
     status_line: PanelStatusLine,
+    mode: PanelMode,
+}
+
+#[derive(Clone, Debug, Copy)]
+pub enum PanelMode {
+    Normal,
+    Insert,
+    StatusCommand,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum PanelMessage {
+    ProcessKeyInput(char),
     ProcessBufferEvent(BufferMessage),
+    ProcessStatusLineEvent(PanelStatusLineMessage),
+    ModeTransition(PanelMode, Option<char>),
 }
 
 impl Panel {
@@ -519,6 +658,31 @@ impl Panel {
         Panel {
             buffer: BufferContent::new(buffer_size),
             status_line: PanelStatusLine::new(status_line_bounds),
+            mode: PanelMode::Normal,
+        }
+    }
+
+    fn handle_mode_selected_key_event(
+        &self,
+        key: iced::keyboard::Key,
+        modified_key: iced::keyboard::Key,
+        modifiers: iced::keyboard::Modifiers,
+    ) -> Option<PanelMessage> {
+        match self.mode {
+            PanelMode::Insert => match self.buffer.handle_key_event(key, modified_key, modifiers) {
+                Some(buffer_msg) => Some(PanelMessage::ProcessBufferEvent(buffer_msg)),
+                _ => None,
+            },
+            PanelMode::StatusCommand => {
+                match self
+                    .status_line
+                    .handle_key_event(key, modified_key, modifiers)
+                {
+                    Some(cmd) => Some(PanelMessage::ProcessStatusLineEvent(cmd)),
+                    _ => None,
+                }
+            }
+            PanelMode::Normal => None,
         }
     }
 }
@@ -530,10 +694,32 @@ impl Component<PanelMessage> for Panel {
         modified_key: iced::keyboard::Key,
         modifiers: iced::keyboard::Modifiers,
     ) -> Option<PanelMessage> {
-        match self.buffer.handle_key_event(key, modified_key, modifiers) {
-            Some(buffer_msg) => Some(PanelMessage::ProcessBufferEvent(buffer_msg)),
-            _ => None,
+        match modified_key {
+            iced::keyboard::key::Key::Character(ref ch_str) => {
+                let ch = ch_str.chars().nth(0).unwrap();
+                if ch == ':' {
+                    match self.mode {
+                        PanelMode::Normal => {
+                            return Some(PanelMessage::ModeTransition(
+                                PanelMode::StatusCommand,
+                                Some(':'),
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // TODO: Send a "commit action" message to the status line instead of just
+            // transitioning immediately.
+            iced::keyboard::key::Key::Named(iced::keyboard::key::Named::Enter) => match self.mode {
+                PanelMode::StatusCommand => {
+                    return Some(PanelMessage::ModeTransition(PanelMode::Normal, None));
+                }
+                _ => {}
+            },
+            _ => {}
         }
+        self.handle_mode_selected_key_event(key, modified_key, modifiers)
     }
 
     fn update(&mut self, message: PanelMessage) -> iced::Task<PanelMessage> {
@@ -542,6 +728,28 @@ impl Component<PanelMessage> for Panel {
                 .buffer
                 .update(buffer_message)
                 .map(|panel_response| PanelMessage::ProcessBufferEvent(panel_response)),
+            PanelMessage::ProcessStatusLineEvent(status_message) => self
+                .status_line
+                .update(status_message)
+                .map(|response| PanelMessage::ProcessStatusLineEvent(response)),
+            PanelMessage::ModeTransition(new_mode, input_buffer_opt) => {
+                self.mode = new_mode;
+                if let Some(input_buffer) = input_buffer_opt {
+                    iced::Task::done(PanelMessage::ProcessKeyInput(input_buffer))
+                } else {
+                    iced::Task::none()
+                }
+            }
+            PanelMessage::ProcessKeyInput(key) => match self.mode {
+                PanelMode::Insert => iced::Task::done(PanelMessage::ProcessBufferEvent(
+                    BufferMessage::AddCharacter(key as u8),
+                )),
+                // TODO: Handle this panel mode.
+                PanelMode::Normal => iced::Task::none(),
+                PanelMode::StatusCommand => iced::Task::done(PanelMessage::ProcessStatusLineEvent(
+                    PanelStatusLineMessage::ProcessKeyInput(key),
+                )),
+            },
         }
     }
 
