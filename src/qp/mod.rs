@@ -198,12 +198,15 @@ where
     }
 }
 
-#[derive(Debug)]
-struct Cursor(usize, usize);
+#[derive(Debug, Clone, Copy)]
+struct Cursor {
+    row: usize,
+    col: usize,
+}
 
 impl std::fmt::Display for Cursor {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Cursor (row: {}, col: {})", self.0, self.1)
+        write!(f, "Cursor (row: {}, col: {})", self.row, self.col)
     }
 }
 
@@ -296,41 +299,37 @@ impl Component<BufferMessage> for BufferContent {
         match message {
             BufferMessage::AddCharacter(ascii_code) => {
                 println!("-> Adding character: {}", ascii_code);
-                let Cursor(row_i, col_i) = self.cursor;
                 self.ensure_cursor();
 
-                let row = &self.data[row_i];
-                let (left, right) = row.split_at(col_i);
+                let row = &self.data[self.cursor.row];
+                let (left, right) = row.split_at(self.cursor.col);
 
                 let mut new_row = String::from(left);
                 new_row.push(ascii_code as char);
                 new_row += right;
 
-                self.data[row_i] = new_row;
-                self.cursor = Cursor(row_i, col_i + 1);
+                self.data[self.cursor.row] = new_row;
+                self.cursor.col += 1
             }
             BufferMessage::RemoveCharacter => {
-                let Cursor(row_i, col_i) = self.cursor;
-                let row = &self.data[row_i];
+                let row = &self.data[self.cursor.row];
                 if row.len() > 0 {
                     let (new_row_ref, _) = row.split_at(row.len() - 1);
-                    self.data[row_i] = String::from(new_row_ref);
-                    self.cursor = Cursor(row_i, col_i - 1);
+                    self.data[self.cursor.row] = String::from(new_row_ref);
+                    self.cursor.col -= 1;
                 }
             }
             BufferMessage::CommitAction(action) => match action {
                 iced::keyboard::key::Named::Enter => {
                     self.ensure_cursor();
-                    let Cursor(row_i, _) = self.cursor;
-                    let (upper, lower) = self.data.split_at(row_i + 1);
+                    let (upper, lower) = self.data.split_at(self.cursor.row + 1);
 
                     let mut new_data = Vec::from(upper);
                     new_data.push(String::new());
                     new_data.append(&mut Vec::from(lower));
 
                     self.data = new_data;
-                    self.cursor = Cursor(row_i + 1, 0);
-                    println!("DBG Updated cursor row: {}", self.cursor);
+                    self.cursor.row += 1
                 }
                 _ => {}
             },
@@ -352,7 +351,7 @@ impl BufferContent {
     fn new(size: iced::Size) -> Self {
         BufferContent {
             data: vec![String::new()],
-            cursor: Cursor(0, 0),
+            cursor: Cursor { row: 0, col: 0 },
             size,
         }
     }
@@ -369,12 +368,11 @@ impl BufferContent {
     }
 
     fn ensure_cursor(&mut self) {
-        let Cursor(row_i, col_i) = self.cursor;
         if self.data.len() == 0 {
             self.data.push(String::new());
         }
-        let new_row_i = std::cmp::min(row_i, self.data.len() - 1);
-        self.cursor = Cursor(new_row_i, col_i);
+        let new_row_i = std::cmp::min(self.cursor.row, self.data.len() - 1);
+        self.cursor.row = new_row_i;
     }
 
     fn handle_ascii_keypress(key: char, modifier: Option<KeyModifier>) -> Option<BufferMessage> {
