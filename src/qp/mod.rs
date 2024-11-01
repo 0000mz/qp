@@ -26,18 +26,27 @@ pub struct CodeSpace<'a> {
     width: f32,
     height: f32,
     buffer_iter: BufferContentIterator<'a>,
+    cursor: &'a Cursor,
 }
 
 impl<'a> CodeSpace<'a> {
     const CELL_WIDTH: usize = 10;
     const CELL_HEIGHT: usize = 14;
     const TEXT_SIZE: usize = 14;
+    // The number of columns that should be allocated for the number line.
+    const LINE_NB_DIGITS: usize = 3;
 
-    fn new(width: f32, height: f32, buffer_iter: BufferContentIterator<'a>) -> Self {
+    fn new(
+        width: f32,
+        height: f32,
+        buffer_iter: BufferContentIterator<'a>,
+        cursor: &'a Cursor,
+    ) -> Self {
         CodeSpace {
             width,
             height,
             buffer_iter,
+            cursor,
         }
     }
 
@@ -90,6 +99,14 @@ impl<'a> CodeSpace<'a> {
             bounds,
         );
     }
+
+    // The number line takes up a certain # of columns. This returns the
+    // row,col that should be used after taking into consideration the space
+    // that the number line takes.
+    fn nb_ofsetted_row_cols(row: usize, col: usize) -> (usize, usize) {
+        let new_col = col + CodeSpace::LINE_NB_DIGITS + 1;
+        (row, new_col)
+    }
 }
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for CodeSpace<'_>
@@ -134,11 +151,10 @@ where
         let cellh: f32 = CodeSpace::CELL_HEIGHT as f32;
 
         // Draw the line numbers.
-        let nb_digits: usize = 3;
         let nb_lines: usize = ((self.height / cellh) as usize) + 1;
         for curr_line in 0..nb_lines {
             let mut l = curr_line;
-            let mut digits = nb_digits;
+            let mut digits = CodeSpace::LINE_NB_DIGITS;
             while l > 0 {
                 let base_10_n = l % 10;
                 self.draw_char_cell(
@@ -157,8 +173,7 @@ where
         }
 
         for cell in self.buffer_iter.into_iter() {
-            let col = (cell.col + (nb_digits as u32) + 1) as usize;
-            let row = cell.row as usize;
+            let (row, col) = CodeSpace::nb_ofsetted_row_cols(cell.row as usize, cell.col as usize);
             let (x, y) = CodeSpace::cell_to_pixel_space(row, col);
 
             let bounds = Rectangle {
@@ -185,6 +200,25 @@ where
                 );
             }
             self.draw_char_cell(renderer, row, col, cell.c);
+        }
+
+        // Draw the cursor
+        {
+            let (row, col) = CodeSpace::nb_ofsetted_row_cols(self.cursor.row, self.cursor.col);
+            let (cursor_x, cursor_y) = CodeSpace::cell_to_pixel_space(row, col);
+            let cursor_bounds = Rectangle {
+                x: cursor_x,
+                y: cursor_y,
+                width: cellw,
+                height: cellh,
+            };
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: cursor_bounds,
+                    ..renderer::Quad::default()
+                },
+                Color::from_rgb(0.0, 0.5, 0.0),
+            );
         }
     }
 }
@@ -329,7 +363,8 @@ impl Component<BufferMessage> for BufferContent {
                     new_data.append(&mut Vec::from(lower));
 
                     self.data = new_data;
-                    self.cursor.row += 1
+                    self.cursor.row += 1;
+                    self.cursor.col = 0;
                 }
                 _ => {}
             },
@@ -342,6 +377,7 @@ impl Component<BufferMessage> for BufferContent {
             self.size.width,
             self.size.height,
             BufferContentIterator::new(self),
+            &self.cursor,
         ))
         .into()
     }
