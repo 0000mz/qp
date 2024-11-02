@@ -459,9 +459,11 @@ impl Component<BufferMessage> for BufferContent {
             BufferMessage::RemoveCharacter => {
                 let row = &self.data[self.cursor.row];
                 if row.len() > 0 {
-                    let (new_row_ref, _) = row.split_at(row.len() - 1);
-                    self.data[self.cursor.row] = String::from(new_row_ref);
-                    self.cursor.col -= 1;
+                    let (left_side_ref, right_side_ref) = row.split_at(self.cursor.col);
+                    if left_side_ref.len() > 0 {
+                      self.data[self.cursor.row] = String::from(&left_side_ref[..left_side_ref.len() - 1]) + right_side_ref;
+                      self.cursor.col -= 1;
+                    }
                 }
             }
             BufferMessage::CommitAction(action) => match action {
@@ -476,6 +478,26 @@ impl Component<BufferMessage> for BufferContent {
                     self.data = new_data;
                     self.cursor.row += 1;
                     self.cursor.col = 0;
+                }
+                iced::keyboard::key::Named::ArrowLeft => {
+                  if self.cursor.col > 0 {
+                  self.cursor.col = std::cmp::max(0, self.cursor.col - 1);
+                  }
+                }
+                iced::keyboard::key::Named::ArrowRight => {
+                  self.cursor.col = std::cmp::min(self.data[self.cursor.row].len(), self.cursor.col + 1);
+                }
+                iced::keyboard::key::Named::ArrowUp => {
+                  if self.cursor.row > 0 {
+                    self.cursor.row = std::cmp::max(0, self.cursor.row - 1);
+                    let max_col = self.data[self.cursor.row].len();
+                    self.cursor.col = std::cmp::min(max_col, self.cursor.col);
+                  }
+                }
+                iced::keyboard::key::Named::ArrowDown => {
+                    self.cursor.row = std::cmp::min(self.data.len() - 1, self.cursor.row + 1);
+                    let max_col = self.data[self.cursor.row].len();
+                    self.cursor.col = std::cmp::min(max_col, self.cursor.col);
                 }
                 _ => {}
             },
@@ -555,7 +577,12 @@ impl BufferContent {
                 println!("DBG Handle named: {:?}", named);
                 match named {
                     iced::keyboard::key::Named::Backspace => Some(BufferMessage::RemoveCharacter),
-                    e @ iced::keyboard::key::Named::Enter => Some(BufferMessage::CommitAction(e)),
+                    e @ iced::keyboard::key::Named::Enter |
+                    e @ iced::keyboard::key::Named::ArrowLeft |
+                    e @ iced::keyboard::key::Named::ArrowRight |
+                    e @ iced::keyboard::key::Named::ArrowUp | 
+                    e @ iced::keyboard::key::Named::ArrowDown
+                     => Some(BufferMessage::CommitAction(e)),
                     iced::keyboard::key::Named::Space => {
                         Some(BufferMessage::AddCharacter(' ' as u8))
                     }
@@ -737,24 +764,47 @@ impl Component<PanelMessage> for Panel {
         match modified_key {
             iced::keyboard::key::Key::Character(ref ch_str) => {
                 let ch = ch_str.chars().nth(0).unwrap();
-                if ch == ':' {
-                    match self.mode {
-                        PanelMode::Normal => {
+                match self.mode {
+                  PanelMode::Normal => {
+                    match ch {
+                      ':' => {
                             return Some(PanelMessage::ModeTransition(
                                 PanelMode::StatusCommand,
                                 Some(':'),
                             ));
-                        }
-                        _ => {}
-                    }
-                } else if ch == 'i' {
-                  match self.mode {
-                    PanelMode::Normal => {
+                      },
+                      'i' => {
                       return Some(PanelMessage::ModeTransition(PanelMode::Insert, None));
-                    },
-                    _ => {}
-                  }
+                      },
+                      'h' => {
+                        return Some(PanelMessage::ProcessBufferEvent(BufferMessage::CommitAction( iced::keyboard::key::Named::ArrowLeft )))
+                      },
+                      'l' => {
+                        return Some(PanelMessage::ProcessBufferEvent(BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowRight)))
+                      }
+                      'j' => {
+                        return Some(PanelMessage::ProcessBufferEvent(BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowDown)))
+                      }
+                      'k' => {
+                        return Some(PanelMessage::ProcessBufferEvent(BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowUp)))
+                      }
+                      _ => {}
+                    }
+                  },
+                  _ => {}
                 }
+            }
+             iced::keyboard::key::Key::Named(e @ iced::keyboard::key::Named::ArrowUp) |
+             iced::keyboard::key::Key::Named(e @ iced::keyboard::key::Named::ArrowDown) |
+             iced::keyboard::key::Key::Named(e @ iced::keyboard::key::Named::ArrowLeft) |
+             iced::keyboard::key::Key::Named(e @ iced::keyboard::key::Named::ArrowRight)
+             => {
+              match self.mode {
+                PanelMode::Normal => {
+                        return Some(PanelMessage::ProcessBufferEvent(BufferMessage::CommitAction(e)))
+                }
+                _ => {}
+              }
             }
             iced::keyboard::key::Key::Named(iced::keyboard::key::Named::Enter) => match self.mode {
                 PanelMode::StatusCommand => {
