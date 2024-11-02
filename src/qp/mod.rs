@@ -582,6 +582,9 @@ impl PanelStatusLine {
 #[derive(Debug, Clone, Copy)]
 pub enum PanelStatusLineMessage {
     ProcessKeyInput(char),
+    RemoveCharacterFromCommand,
+    CommitCurrentAction,
+    CurrentActionResponse
 }
 
 impl Component<PanelStatusLineMessage> for PanelStatusLine {
@@ -591,12 +594,19 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
         modified_key: iced::keyboard::Key,
         _modifiers: iced::keyboard::Modifiers,
     ) -> Option<PanelStatusLineMessage> {
-        if let iced::keyboard::Key::Character(c) = modified_key {
+      match modified_key {
+        iced::keyboard::Key::Character(c) => {
             let ch = c.chars().nth(0).unwrap();
             Some(PanelStatusLineMessage::ProcessKeyInput(ch))
-        } else {
-            None
-        }
+        },
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Space) => {
+          Some(PanelStatusLineMessage::ProcessKeyInput(' '))
+        },
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
+            Some(PanelStatusLineMessage::RemoveCharacterFromCommand)
+        },
+        _ => None
+      }
     }
 
     fn update(&mut self, message: PanelStatusLineMessage) -> iced::Task<PanelStatusLineMessage> {
@@ -604,7 +614,19 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
             PanelStatusLineMessage::ProcessKeyInput(c) => {
                 self.current_command.push(c);
                 iced::Task::none()
-            }
+            },
+            PanelStatusLineMessage::RemoveCharacterFromCommand => {
+              if self.current_command.len() > 1 {
+                self.current_command = String::from(&self.current_command[0..self.current_command.len()-1]);
+              }
+              iced::Task::none()
+            },
+            PanelStatusLineMessage::CommitCurrentAction => {
+              println!("TODO: Commit action: {}", self.current_command);
+              self.current_command = String::new();
+              iced::Task::done(PanelStatusLineMessage::CurrentActionResponse)
+            },
+            PanelStatusLineMessage::CurrentActionResponse => iced::Task::none()
         }
     }
 
@@ -713,7 +735,7 @@ impl Component<PanelMessage> for Panel {
             // transitioning immediately.
             iced::keyboard::key::Key::Named(iced::keyboard::key::Named::Enter) => match self.mode {
                 PanelMode::StatusCommand => {
-                    return Some(PanelMessage::ModeTransition(PanelMode::Normal, None));
+                    return Some(PanelMessage::ProcessStatusLineEvent(PanelStatusLineMessage::CommitCurrentAction));
                 }
                 _ => {}
             },
@@ -728,10 +750,20 @@ impl Component<PanelMessage> for Panel {
                 .buffer
                 .update(buffer_message)
                 .map(|panel_response| PanelMessage::ProcessBufferEvent(panel_response)),
-            PanelMessage::ProcessStatusLineEvent(status_message) => self
+            PanelMessage::ProcessStatusLineEvent(status_message) => {
+              match status_message {
+                PanelStatusLineMessage::CurrentActionResponse => {
+                  iced::Task::done(PanelMessage::ModeTransition(PanelMode::Normal, None))
+                },
+                _ =>  {
+            self
                 .status_line
                 .update(status_message)
-                .map(|response| PanelMessage::ProcessStatusLineEvent(response)),
+                .map(|response| PanelMessage::ProcessStatusLineEvent(response))
+
+                }
+              }
+            }
             PanelMessage::ModeTransition(new_mode, input_buffer_opt) => {
                 self.mode = new_mode;
                 if let Some(input_buffer) = input_buffer_opt {
