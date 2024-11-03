@@ -393,6 +393,7 @@ pub enum BufferMessage<AsciiCode = u8> {
     AddCharacter(AsciiCode),
     RemoveCharacter,
     CommitAction(iced::keyboard::key::Named),
+    HorizontalCursorDelta(i32),
 }
 
 #[derive(Debug)]
@@ -561,6 +562,13 @@ impl Component<BufferMessage> for BufferContent {
                 }
                 _ => {}
             },
+            BufferMessage::HorizontalCursorDelta(delta) => {
+                let new_col = (self.cursor.col as i32) + delta;
+                if new_col >= 0 {
+                    let new_col = new_col as usize;
+                    self.cursor.col = std::cmp::min(new_col, self.data[self.cursor.row].len());
+                }
+            }
         }
         iced::Task::none()
     }
@@ -953,6 +961,23 @@ pub enum UpstreamedPanelMessage {
 }
 
 #[derive(Debug, Clone)]
+pub enum BufferCommandTranstion {
+    // Enter buffer comamnd insert mode with append transformation.
+    // This should move the cursor to the next character instead of
+    // starting insert from current character.
+    EnterInAppend,
+    // Normal insert mode. No transformation made on the buffer.
+    EnterInInsert,
+}
+
+#[derive(Debug, Clone)]
+pub enum ModeTransitionPayload {
+    Char(char),
+    InsertModePayload(BufferCommandTranstion),
+    None,
+}
+
+#[derive(Debug, Clone)]
 pub enum PanelMessage {
     ProcessKeyInput(char),
     ProcessBufferEvent(BufferMessage),
@@ -960,7 +985,7 @@ pub enum PanelMessage {
     ModeTransition(
         PanelMode, /* prev mode */
         PanelMode, /* new mode */
-        Option<char>,
+        ModeTransitionPayload,
     ),
     AttachBufferSource(Option<BufferSource>),
     AtttachContentToBuffer(Result<Vec<String>, FileError>),
@@ -1029,14 +1054,25 @@ impl Component<PanelMessage> for Panel {
                             return Some(PanelMessage::ModeTransition(
                                 self.mode,
                                 PanelMode::StatusCommand,
-                                Some(':'),
+                                ModeTransitionPayload::Char(':'),
                             ));
                         }
                         'i' => {
                             return Some(PanelMessage::ModeTransition(
                                 self.mode,
                                 PanelMode::Insert,
-                                None,
+                                ModeTransitionPayload::InsertModePayload(
+                                    BufferCommandTranstion::EnterInInsert,
+                                ),
+                            ));
+                        }
+                        'a' => {
+                            return Some(PanelMessage::ModeTransition(
+                                self.mode,
+                                PanelMode::Insert,
+                                ModeTransitionPayload::InsertModePayload(
+                                    BufferCommandTranstion::EnterInAppend,
+                                ),
                             ));
                         }
                         'h' => {
@@ -1093,7 +1129,7 @@ impl Component<PanelMessage> for Panel {
                         return Some(PanelMessage::ModeTransition(
                             self.mode,
                             PanelMode::Normal,
-                            None,
+                            ModeTransitionPayload::None,
                         ));
                     }
                     _ => {}
@@ -1112,14 +1148,18 @@ impl Component<PanelMessage> for Panel {
                 .update(buffer_message)
                 .map(|panel_response| PanelMessage::ProcessBufferEvent(panel_response)),
             PanelMessage::ProcessStatusLineEvent(status_message) => match status_message {
-                PanelStatusLineMessage::UpstreamResponse(None) => iced::Task::done(
-                    PanelMessage::ModeTransition(self.mode, PanelMode::Normal, None),
-                ),
+                PanelStatusLineMessage::UpstreamResponse(None) => {
+                    iced::Task::done(PanelMessage::ModeTransition(
+                        self.mode,
+                        PanelMode::Normal,
+                        ModeTransitionPayload::None,
+                    ))
+                }
                 PanelStatusLineMessage::UpstreamResponse(Some(upstream_message)) => {
                     let mut tasks = vec![iced::Task::done(PanelMessage::ModeTransition(
                         self.mode,
                         PanelMode::Normal,
-                        None,
+                        ModeTransitionPayload::None,
                     ))];
                     match upstream_message {
                         UpstreamedPanelMessage::ExecuteCommand(command) => match command {
@@ -1180,16 +1220,31 @@ impl Component<PanelMessage> for Panel {
                 }
                 iced::Task::none()
             }
-            PanelMessage::ModeTransition(prev_mode, new_mode, input_buffer_opt) => {
+            PanelMessage::ModeTransition(prev_mode, new_mode, transition_payload) => {
                 self.mode = new_mode;
 
                 let mut tasks = vec![iced::Task::done(PanelMessage::ProcessStatusLineEvent(
                     PanelStatusLineMessage::DisplayMode(new_mode),
                 ))];
-                if let Some(input_buffer) = input_buffer_opt {
-                    tasks.push(iced::Task::done(PanelMessage::ProcessKeyInput(
-                        input_buffer,
-                    )));
+                match transition_payload {
+                    ModeTransitionPayload::Char(input_buffer) => {
+                        tasks.push(iced::Task::done(PanelMessage::ProcessKeyInput(
+                            input_buffer,
+                        )));
+                    }
+                    ModeTransitionPayload::InsertModePayload(payload) => {
+                        match payload {
+                            BufferCommandTranstion::EnterInAppend => {
+                                tasks.push(iced::Task::done(PanelMessage::ProcessBufferEvent(
+                                    BufferMessage::HorizontalCursorDelta(1),
+                                )));
+                            }
+                            // When EnterInInsert is received, nothing extra needs to be done. The mode is already changed to
+                            // insert and any future keys will be forwarded to the right buffer.
+                            BufferCommandTranstion::EnterInInsert => {}
+                        };
+                    }
+                    ModeTransitionPayload::None => {}
                 }
                 if prev_mode == PanelMode::StatusCommand {
                     // An extra task needs to be dispatched to clear the status line command buffer.
