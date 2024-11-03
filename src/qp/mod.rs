@@ -1,5 +1,6 @@
 use core::str;
 use std::io::Read;
+use std::io::Write;
 
 use iced::advanced::layout;
 use iced::advanced::renderer;
@@ -690,6 +691,12 @@ impl PanelStatusLine {
                     )),
                 )));
             }
+            "w" => {
+                println!("Dispatching write-file command.");
+                return iced::Task::done(PanelStatusLineMessage::UpstreamResponse(Some(
+                    UpstreamedPanelMessage::ExecuteCommand(PanelCommand::SaveCurrentFile),
+                )));
+            }
             _ => {}
         }
         iced::Task::done(PanelStatusLineMessage::UpstreamResponse(None))
@@ -812,6 +819,7 @@ pub enum FileError {
     // This should be used to communicate unsupported file types, such as
     // directories. Not the same as `FileNotFound`.
     NotANormalFile,
+    SaveError,
 }
 
 async fn open_relative_file(filepath: Option<&String>) -> Result<std::path::PathBuf, FileError> {
@@ -857,6 +865,20 @@ async fn open_file(filepath: Option<&String>) -> Result<std::path::PathBuf, File
     }
 }
 
+async fn save_file(contents: String, filepath: std::path::PathBuf) -> Result<(), FileError> {
+    // NOTE: Assumes the file already exists, hence the opening of the file and not creation.
+    match std::fs::OpenOptions::new().write(true).open(filepath) {
+        Err(_) => Err(FileError::SaveError),
+        Ok(mut file) => match file.write_all(contents.as_bytes()) {
+            Err(e) => {
+                println!("Failed to save file: {:?}", e);
+                Err(FileError::SaveError)
+            }
+            Ok(_) => Ok(()),
+        },
+    }
+}
+
 async fn read_file(filepath: std::path::PathBuf) -> Result<Vec<String>, FileError> {
     if !filepath.exists() {
         return Err(FileError::FileNotFound);
@@ -891,9 +913,12 @@ impl BufferSource {
             // requesting the content on a call to read(), this no longer needs to return
             // an option and the open_file also does not need to be performed.
             // Refactor this to reflect that change.
-            Ok(filepath_buf) => Some(BufferSource {
-                filepath: filepath_buf,
-            }),
+            Ok(filepath_buf) => {
+                println!("Setting BufferSource filepath buf: {:?}", filepath_buf);
+                Some(BufferSource {
+                    filepath: filepath_buf,
+                })
+            }
             // TODO: Instead of returning an option, maybe forward the error result..
             Err(_) => None,
         }
@@ -917,6 +942,9 @@ pub enum PanelMode {
 #[derive(Clone, Debug)]
 pub enum PanelCommand {
     OpenFile(Option<Box<String>>),
+    // Save the file that is currently open in the active buffer.
+    // If no file is open in the buffer, nothing should be done.
+    SaveCurrentFile,
 }
 
 #[derive(Debug, Clone)]
@@ -936,6 +964,7 @@ pub enum PanelMessage {
     ),
     AttachBufferSource(Option<BufferSource>),
     AtttachContentToBuffer(Result<Vec<String>, FileError>),
+    Empty, // does nothing
 }
 
 impl Panel {
@@ -1077,6 +1106,7 @@ impl Component<PanelMessage> for Panel {
 
     fn update(&mut self, message: PanelMessage) -> iced::Task<PanelMessage> {
         match message {
+            PanelMessage::Empty => iced::Task::none(),
             PanelMessage::ProcessBufferEvent(buffer_message) => self
                 .buffer
                 .update(buffer_message)
@@ -1100,6 +1130,17 @@ impl Component<PanelMessage> for Panel {
                                     PanelMessage::AttachBufferSource,
                                 ));
                             }
+                            PanelCommand::SaveCurrentFile => match self.buffer_source.as_ref() {
+                                None => {}
+                                Some(buffersrc) => {
+                                    let file_contents = self.buffer.data.join("\n");
+                                    let filepath = buffersrc.filepath.clone();
+                                    tasks.push(iced::Task::perform(
+                                        save_file(file_contents, filepath),
+                                        |_| PanelMessage::Empty,
+                                    ));
+                                }
+                            },
                         },
                     }
 
