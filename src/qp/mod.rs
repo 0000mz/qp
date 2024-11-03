@@ -697,10 +697,18 @@ impl PanelStatusLine {
 }
 
 #[derive(Debug, Clone)]
+pub enum CurrentActionHandelingMode {
+    // Commit the current action into its actionable task.
+    Commit,
+    // Abandon the current action alltogether.
+    Abandon,
+}
+
+#[derive(Debug, Clone)]
 pub enum PanelStatusLineMessage {
     ProcessKeyInput(char),
     RemoveCharacterFromCommand,
-    CommitCurrentAction,
+    HandleCurrentAction(CurrentActionHandelingMode),
     DisplayMode(PanelMode),
     UpstreamResponse(Option<UpstreamedPanelMessage>),
 }
@@ -746,14 +754,18 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
                 }
                 iced::Task::none()
             }
-            PanelStatusLineMessage::CommitCurrentAction => {
-                if let Some(command) = &self.current_command {
-                    let cmd = command.clone();
-                    self.current_command = None;
-                    self.translate_buffer_command(&cmd[..])
-                } else {
-                    iced::Task::done(PanelStatusLineMessage::UpstreamResponse(None))
+            PanelStatusLineMessage::HandleCurrentAction(handle_mode) => {
+                let cmd_option = self.current_command.clone();
+                self.current_command = None;
+                match handle_mode {
+                    CurrentActionHandelingMode::Commit => {
+                        if let Some(command) = &cmd_option {
+                            return self.translate_buffer_command(&command[..]);
+                        }
+                    }
+                    CurrentActionHandelingMode::Abandon => {}
                 }
+                iced::Task::done(PanelStatusLineMessage::UpstreamResponse(None))
             }
             PanelStatusLineMessage::DisplayMode(mode) => {
                 match mode {
@@ -895,7 +907,7 @@ struct Panel {
     mode: PanelMode,
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq)]
 pub enum PanelMode {
     Normal,
     Insert,
@@ -917,7 +929,11 @@ pub enum PanelMessage {
     ProcessKeyInput(char),
     ProcessBufferEvent(BufferMessage),
     ProcessStatusLineEvent(PanelStatusLineMessage),
-    ModeTransition(PanelMode, Option<char>),
+    ModeTransition(
+        PanelMode, /* prev mode */
+        PanelMode, /* new mode */
+        Option<char>,
+    ),
     AttachBufferSource(Option<BufferSource>),
     AtttachContentToBuffer(Result<Vec<String>, FileError>),
 }
@@ -982,12 +998,17 @@ impl Component<PanelMessage> for Panel {
                     PanelMode::Normal => match ch {
                         ':' => {
                             return Some(PanelMessage::ModeTransition(
+                                self.mode,
                                 PanelMode::StatusCommand,
                                 Some(':'),
                             ));
                         }
                         'i' => {
-                            return Some(PanelMessage::ModeTransition(PanelMode::Insert, None));
+                            return Some(PanelMessage::ModeTransition(
+                                self.mode,
+                                PanelMode::Insert,
+                                None,
+                            ));
                         }
                         'h' => {
                             return Some(PanelMessage::ProcessBufferEvent(
@@ -1030,15 +1051,21 @@ impl Component<PanelMessage> for Panel {
             iced::keyboard::key::Key::Named(iced::keyboard::key::Named::Enter) => match self.mode {
                 PanelMode::StatusCommand => {
                     return Some(PanelMessage::ProcessStatusLineEvent(
-                        PanelStatusLineMessage::CommitCurrentAction,
+                        PanelStatusLineMessage::HandleCurrentAction(
+                            CurrentActionHandelingMode::Commit,
+                        ),
                     ));
                 }
                 _ => {}
             },
             iced::keyboard::key::Key::Named(iced::keyboard::key::Named::Escape) => {
                 match self.mode {
-                    PanelMode::Insert => {
-                        return Some(PanelMessage::ModeTransition(PanelMode::Normal, None));
+                    PanelMode::Insert | PanelMode::StatusCommand => {
+                        return Some(PanelMessage::ModeTransition(
+                            self.mode,
+                            PanelMode::Normal,
+                            None,
+                        ));
                     }
                     _ => {}
                 }
@@ -1055,11 +1082,12 @@ impl Component<PanelMessage> for Panel {
                 .update(buffer_message)
                 .map(|panel_response| PanelMessage::ProcessBufferEvent(panel_response)),
             PanelMessage::ProcessStatusLineEvent(status_message) => match status_message {
-                PanelStatusLineMessage::UpstreamResponse(None) => {
-                    iced::Task::done(PanelMessage::ModeTransition(PanelMode::Normal, None))
-                }
+                PanelStatusLineMessage::UpstreamResponse(None) => iced::Task::done(
+                    PanelMessage::ModeTransition(self.mode, PanelMode::Normal, None),
+                ),
                 PanelStatusLineMessage::UpstreamResponse(Some(upstream_message)) => {
                     let mut tasks = vec![iced::Task::done(PanelMessage::ModeTransition(
+                        self.mode,
                         PanelMode::Normal,
                         None,
                     ))];
@@ -1111,7 +1139,7 @@ impl Component<PanelMessage> for Panel {
                 }
                 iced::Task::none()
             }
-            PanelMessage::ModeTransition(new_mode, input_buffer_opt) => {
+            PanelMessage::ModeTransition(prev_mode, new_mode, input_buffer_opt) => {
                 self.mode = new_mode;
 
                 let mut tasks = vec![iced::Task::done(PanelMessage::ProcessStatusLineEvent(
@@ -1120,6 +1148,14 @@ impl Component<PanelMessage> for Panel {
                 if let Some(input_buffer) = input_buffer_opt {
                     tasks.push(iced::Task::done(PanelMessage::ProcessKeyInput(
                         input_buffer,
+                    )));
+                }
+                if prev_mode == PanelMode::StatusCommand {
+                    // An extra task needs to be dispatched to clear the status line command buffer.
+                    tasks.push(iced::Task::done(PanelMessage::ProcessStatusLineEvent(
+                        PanelStatusLineMessage::HandleCurrentAction(
+                            CurrentActionHandelingMode::Abandon,
+                        ),
                     )));
                 }
                 iced::Task::batch(tasks)
