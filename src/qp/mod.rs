@@ -41,7 +41,7 @@ pub struct StatusLineRender {
     width: f32,
     height: f32,
     command: String,
-    mode: String
+    mode: String,
 }
 
 impl StatusLineRender {
@@ -52,7 +52,7 @@ impl StatusLineRender {
             width,
             height,
             command,
-            mode
+            mode,
         }
     }
 }
@@ -284,6 +284,26 @@ where
             }
         }
 
+        // Draw the current line
+        {
+            let (_, cursor_y) =
+                GridSpaceUtil::cell_to_pixel_space(self.cursor.row, self.cursor.col);
+            let bounds = Rectangle {
+                x: 0.0,
+                y: cursor_y,
+                width: self.width,
+                height: cellh,
+            };
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds,
+                    ..renderer::Quad::default()
+                },
+                Color::from_rgb(0.2, 0.0, 0.0),
+            );
+        }
+
+        // Draw the text individually in each cell.
         for cell in self.buffer_iter.into_iter() {
             let (row, col) = CodeSpace::nb_ofsetted_row_cols(cell.row as usize, cell.col as usize);
             let (x, y) = GridSpaceUtil::cell_to_pixel_space(row, col);
@@ -461,8 +481,10 @@ impl Component<BufferMessage> for BufferContent {
                 if row.len() > 0 {
                     let (left_side_ref, right_side_ref) = row.split_at(self.cursor.col);
                     if left_side_ref.len() > 0 {
-                      self.data[self.cursor.row] = String::from(&left_side_ref[..left_side_ref.len() - 1]) + right_side_ref;
-                      self.cursor.col -= 1;
+                        self.data[self.cursor.row] =
+                            String::from(&left_side_ref[..left_side_ref.len() - 1])
+                                + right_side_ref;
+                        self.cursor.col -= 1;
                     }
                 }
             }
@@ -476,10 +498,10 @@ impl Component<BufferMessage> for BufferContent {
                     // Split the current row at the column point and move the data to the right of cursor
                     // to the next line.
                     let new_line: String = {
-                      let (left, right) = upper[upper.len() - 1].split_at(self.cursor.col);
-                      let last_i = new_data.len() - 1;
-                      new_data[last_i] = String::from(&left[..]);
-                      String::from(&right[..])
+                        let (left, right) = upper[upper.len() - 1].split_at(self.cursor.col);
+                        let last_i = new_data.len() - 1;
+                        new_data[last_i] = String::from(&left[..]);
+                        String::from(&right[..])
                     };
 
                     new_data.push(new_line);
@@ -490,19 +512,20 @@ impl Component<BufferMessage> for BufferContent {
                     self.cursor.col = 0;
                 }
                 iced::keyboard::key::Named::ArrowLeft => {
-                  if self.cursor.col > 0 {
-                  self.cursor.col = std::cmp::max(0, self.cursor.col - 1);
-                  }
+                    if self.cursor.col > 0 {
+                        self.cursor.col = std::cmp::max(0, self.cursor.col - 1);
+                    }
                 }
                 iced::keyboard::key::Named::ArrowRight => {
-                  self.cursor.col = std::cmp::min(self.data[self.cursor.row].len(), self.cursor.col + 1);
+                    self.cursor.col =
+                        std::cmp::min(self.data[self.cursor.row].len(), self.cursor.col + 1);
                 }
                 iced::keyboard::key::Named::ArrowUp => {
-                  if self.cursor.row > 0 {
-                    self.cursor.row = std::cmp::max(0, self.cursor.row - 1);
-                    let max_col = self.data[self.cursor.row].len();
-                    self.cursor.col = std::cmp::min(max_col, self.cursor.col);
-                  }
+                    if self.cursor.row > 0 {
+                        self.cursor.row = std::cmp::max(0, self.cursor.row - 1);
+                        let max_col = self.data[self.cursor.row].len();
+                        self.cursor.col = std::cmp::min(max_col, self.cursor.col);
+                    }
                 }
                 iced::keyboard::key::Named::ArrowDown => {
                     self.cursor.row = std::cmp::min(self.data.len() - 1, self.cursor.row + 1);
@@ -587,12 +610,13 @@ impl BufferContent {
                 println!("DBG Handle named: {:?}", named);
                 match named {
                     iced::keyboard::key::Named::Backspace => Some(BufferMessage::RemoveCharacter),
-                    e @ iced::keyboard::key::Named::Enter |
-                    e @ iced::keyboard::key::Named::ArrowLeft |
-                    e @ iced::keyboard::key::Named::ArrowRight |
-                    e @ iced::keyboard::key::Named::ArrowUp | 
-                    e @ iced::keyboard::key::Named::ArrowDown
-                     => Some(BufferMessage::CommitAction(e)),
+                    e @ iced::keyboard::key::Named::Enter
+                    | e @ iced::keyboard::key::Named::ArrowLeft
+                    | e @ iced::keyboard::key::Named::ArrowRight
+                    | e @ iced::keyboard::key::Named::ArrowUp
+                    | e @ iced::keyboard::key::Named::ArrowDown => {
+                        Some(BufferMessage::CommitAction(e))
+                    }
                     iced::keyboard::key::Named::Space => {
                         Some(BufferMessage::AddCharacter(' ' as u8))
                     }
@@ -615,7 +639,7 @@ impl PanelStatusLine {
         PanelStatusLine {
             bounds,
             current_command: String::new(),
-            mode_string: String::from("NORMAL")
+            mode_string: String::from("NORMAL"),
         }
     }
 }
@@ -626,7 +650,7 @@ pub enum PanelStatusLineMessage {
     RemoveCharacterFromCommand,
     CommitCurrentAction,
     CurrentActionResponse,
-    DisplayMode(PanelMode)
+    DisplayMode(PanelMode),
 }
 
 impl Component<PanelStatusLineMessage> for PanelStatusLine {
@@ -636,19 +660,19 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
         modified_key: iced::keyboard::Key,
         _modifiers: iced::keyboard::Modifiers,
     ) -> Option<PanelStatusLineMessage> {
-      match modified_key {
-        iced::keyboard::Key::Character(c) => {
-            let ch = c.chars().nth(0).unwrap();
-            Some(PanelStatusLineMessage::ProcessKeyInput(ch))
-        },
-        iced::keyboard::Key::Named(iced::keyboard::key::Named::Space) => {
-          Some(PanelStatusLineMessage::ProcessKeyInput(' '))
-        },
-        iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
-            Some(PanelStatusLineMessage::RemoveCharacterFromCommand)
-        },
-        _ => None
-      }
+        match modified_key {
+            iced::keyboard::Key::Character(c) => {
+                let ch = c.chars().nth(0).unwrap();
+                Some(PanelStatusLineMessage::ProcessKeyInput(ch))
+            }
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Space) => {
+                Some(PanelStatusLineMessage::ProcessKeyInput(' '))
+            }
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
+                Some(PanelStatusLineMessage::RemoveCharacterFromCommand)
+            }
+            _ => None,
+        }
     }
 
     fn update(&mut self, message: PanelStatusLineMessage) -> iced::Task<PanelStatusLineMessage> {
@@ -656,31 +680,32 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
             PanelStatusLineMessage::ProcessKeyInput(c) => {
                 self.current_command.push(c);
                 iced::Task::none()
-            },
+            }
             PanelStatusLineMessage::RemoveCharacterFromCommand => {
-              if self.current_command.len() > 1 {
-                self.current_command = String::from(&self.current_command[0..self.current_command.len()-1]);
-              }
-              iced::Task::none()
-            },
+                if self.current_command.len() > 1 {
+                    self.current_command =
+                        String::from(&self.current_command[0..self.current_command.len() - 1]);
+                }
+                iced::Task::none()
+            }
             PanelStatusLineMessage::CommitCurrentAction => {
-              println!("TODO: Commit action: {}", self.current_command);
-              self.current_command = String::new();
-              iced::Task::done(PanelStatusLineMessage::CurrentActionResponse)
-            },
+                println!("TODO: Commit action: {}", self.current_command);
+                self.current_command = String::new();
+                iced::Task::done(PanelStatusLineMessage::CurrentActionResponse)
+            }
             PanelStatusLineMessage::DisplayMode(mode) => {
-              match mode  {
-                PanelMode::Insert => {
-                  self.mode_string = String::from("INSERT");
-                },
-                PanelMode::Normal => {
-                  self.mode_string = String::from("NORMAL");
-                },
-                PanelMode::StatusCommand => {}
-              }
-              iced::Task::none()
-            },
-            PanelStatusLineMessage::CurrentActionResponse => iced::Task::none()
+                match mode {
+                    PanelMode::Insert => {
+                        self.mode_string = String::from("INSERT");
+                    }
+                    PanelMode::Normal => {
+                        self.mode_string = String::from("NORMAL");
+                    }
+                    PanelMode::StatusCommand => {}
+                }
+                iced::Task::none()
+            }
+            PanelStatusLineMessage::CurrentActionResponse => iced::Task::none(),
         }
     }
 
@@ -692,7 +717,7 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
             self.bounds.height,
             // TODO: Pass by reference.
             self.current_command.clone(),
-            self.mode_string.clone()
+            self.mode_string.clone(),
         )
         .into()
     }
@@ -775,59 +800,70 @@ impl Component<PanelMessage> for Panel {
             iced::keyboard::key::Key::Character(ref ch_str) => {
                 let ch = ch_str.chars().nth(0).unwrap();
                 match self.mode {
-                  PanelMode::Normal => {
-                    match ch {
-                      ':' => {
+                    PanelMode::Normal => match ch {
+                        ':' => {
                             return Some(PanelMessage::ModeTransition(
                                 PanelMode::StatusCommand,
                                 Some(':'),
                             ));
-                      },
-                      'i' => {
-                      return Some(PanelMessage::ModeTransition(PanelMode::Insert, None));
-                      },
-                      'h' => {
-                        return Some(PanelMessage::ProcessBufferEvent(BufferMessage::CommitAction( iced::keyboard::key::Named::ArrowLeft )))
-                      },
-                      'l' => {
-                        return Some(PanelMessage::ProcessBufferEvent(BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowRight)))
-                      }
-                      'j' => {
-                        return Some(PanelMessage::ProcessBufferEvent(BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowDown)))
-                      }
-                      'k' => {
-                        return Some(PanelMessage::ProcessBufferEvent(BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowUp)))
-                      }
-                      _ => {}
-                    }
-                  },
-                  _ => {}
+                        }
+                        'i' => {
+                            return Some(PanelMessage::ModeTransition(PanelMode::Insert, None));
+                        }
+                        'h' => {
+                            return Some(PanelMessage::ProcessBufferEvent(
+                                BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowLeft),
+                            ))
+                        }
+                        'l' => {
+                            return Some(PanelMessage::ProcessBufferEvent(
+                                BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowRight),
+                            ))
+                        }
+                        'j' => {
+                            return Some(PanelMessage::ProcessBufferEvent(
+                                BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowDown),
+                            ))
+                        }
+                        'k' => {
+                            return Some(PanelMessage::ProcessBufferEvent(
+                                BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowUp),
+                            ))
+                        }
+                        _ => {}
+                    },
+                    _ => {}
                 }
             }
-             iced::keyboard::key::Key::Named(e @ iced::keyboard::key::Named::ArrowUp) |
-             iced::keyboard::key::Key::Named(e @ iced::keyboard::key::Named::ArrowDown) |
-             iced::keyboard::key::Key::Named(e @ iced::keyboard::key::Named::ArrowLeft) |
-             iced::keyboard::key::Key::Named(e @ iced::keyboard::key::Named::ArrowRight)
-             => {
-              match self.mode {
-                PanelMode::Normal => {
-                        return Some(PanelMessage::ProcessBufferEvent(BufferMessage::CommitAction(e)))
+            iced::keyboard::key::Key::Named(e @ iced::keyboard::key::Named::ArrowUp)
+            | iced::keyboard::key::Key::Named(e @ iced::keyboard::key::Named::ArrowDown)
+            | iced::keyboard::key::Key::Named(e @ iced::keyboard::key::Named::ArrowLeft)
+            | iced::keyboard::key::Key::Named(e @ iced::keyboard::key::Named::ArrowRight) => {
+                match self.mode {
+                    PanelMode::Normal => {
+                        return Some(PanelMessage::ProcessBufferEvent(
+                            BufferMessage::CommitAction(e),
+                        ))
+                    }
+                    _ => {}
                 }
-                _ => {}
-              }
             }
             iced::keyboard::key::Key::Named(iced::keyboard::key::Named::Enter) => match self.mode {
                 PanelMode::StatusCommand => {
-                    return Some(PanelMessage::ProcessStatusLineEvent(PanelStatusLineMessage::CommitCurrentAction));
+                    return Some(PanelMessage::ProcessStatusLineEvent(
+                        PanelStatusLineMessage::CommitCurrentAction,
+                    ));
                 }
                 _ => {}
             },
-            iced::keyboard::key::Key::Named(iced::keyboard::key::Named::Escape) => match self.mode {
-              PanelMode::Insert => {
-                return Some(PanelMessage::ModeTransition(PanelMode::Normal, None));
-              },
-              _ => {}
-            },
+            iced::keyboard::key::Key::Named(iced::keyboard::key::Named::Escape) => {
+                match self.mode {
+                    PanelMode::Insert => {
+                        return Some(PanelMessage::ModeTransition(PanelMode::Normal, None));
+                    }
+                    _ => {}
+                }
+            }
             _ => {}
         }
         self.handle_mode_selected_key_event(key, modified_key, modifiers)
@@ -839,26 +875,25 @@ impl Component<PanelMessage> for Panel {
                 .buffer
                 .update(buffer_message)
                 .map(|panel_response| PanelMessage::ProcessBufferEvent(panel_response)),
-            PanelMessage::ProcessStatusLineEvent(status_message) => {
-              match status_message {
+            PanelMessage::ProcessStatusLineEvent(status_message) => match status_message {
                 PanelStatusLineMessage::CurrentActionResponse => {
-                  iced::Task::done(PanelMessage::ModeTransition(PanelMode::Normal, None))
-                },
-                _ =>  {
-            self
-                .status_line
-                .update(status_message)
-                .map(|response| PanelMessage::ProcessStatusLineEvent(response))
-
+                    iced::Task::done(PanelMessage::ModeTransition(PanelMode::Normal, None))
                 }
-              }
-            }
+                _ => self
+                    .status_line
+                    .update(status_message)
+                    .map(|response| PanelMessage::ProcessStatusLineEvent(response)),
+            },
             PanelMessage::ModeTransition(new_mode, input_buffer_opt) => {
                 self.mode = new_mode;
 
-                let mut tasks = vec![iced::Task::done(PanelMessage::ProcessStatusLineEvent(PanelStatusLineMessage::DisplayMode(new_mode)))];
+                let mut tasks = vec![iced::Task::done(PanelMessage::ProcessStatusLineEvent(
+                    PanelStatusLineMessage::DisplayMode(new_mode),
+                ))];
                 if let Some(input_buffer) = input_buffer_opt {
-                  tasks.push(iced::Task::done(PanelMessage::ProcessKeyInput(input_buffer))); 
+                    tasks.push(iced::Task::done(PanelMessage::ProcessKeyInput(
+                        input_buffer,
+                    )));
                 }
                 iced::Task::batch(tasks)
             }
