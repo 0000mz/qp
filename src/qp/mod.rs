@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use iced::advanced::layout;
 use iced::advanced::renderer;
 use iced::advanced::widget::Tree;
@@ -650,6 +652,32 @@ impl BufferContent {
     }
 }
 
+async fn open_file(filepath: Option<String>) -> Result<(), FileError> {
+    // TODO: Allow opening of relative paths. The path should be relative to the current workspace, once the
+    // workspace abstraction has been implemented.
+    if filepath.is_none() {
+        return Err(FileError::NoFileSpecified);
+    }
+    let path = std::path::Path::new(filepath.as_ref().unwrap());
+    println!("Opening file: {:?}", filepath);
+    if !path.exists() {
+        return Err(FileError::FileNotFound);
+    }
+
+    let mut file = match std::fs::File::open(&path) {
+        Err(_) => {
+            return Err(FileError::OpenError);
+        }
+        Ok(file) => file,
+    };
+
+    let mut file_buffer = Vec::new();
+    match file.read_to_end(&mut file_buffer) {
+        Err(_) => Err(FileError::ReadError),
+        Ok(_) => Ok(()),
+    }
+}
+
 struct PanelStatusLine {
     bounds: Rectangle,
     current_command: Option<String>,
@@ -664,6 +692,48 @@ impl PanelStatusLine {
             mode_string: String::from("NORMAL"),
         }
     }
+
+    fn handle_buffer_command(&self, command: &str) -> iced::Task<PanelStatusLineMessage> {
+        println!("handeling buffer command: [{}]", command);
+        let parts = command
+            .split_whitespace()
+            .map(|s| String::from(s))
+            .collect::<Vec<String>>();
+        if parts.len() == 0 {
+            return iced::Task::none();
+        }
+        match &parts[0][..] {
+            "o" => {
+                return iced::Task::perform(
+                    open_file(if parts.len() == 2 {
+                        Some(parts[1].clone())
+                    } else {
+                        None
+                    }),
+                    |res| {
+                        PanelStatusLineMessage::CurrentActionResponse(Some(
+                            ActionResponse::FileOpenResult(res),
+                        ))
+                    },
+                );
+            }
+            _ => {}
+        }
+        iced::Task::none()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum FileError {
+    NoFileSpecified,
+    FileNotFound,
+    OpenError,
+    ReadError,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ActionResponse {
+    FileOpenResult(Result<(), FileError>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -671,7 +741,7 @@ pub enum PanelStatusLineMessage {
     ProcessKeyInput(char),
     RemoveCharacterFromCommand,
     CommitCurrentAction,
-    CurrentActionResponse,
+    CurrentActionResponse(Option<ActionResponse>),
     DisplayMode(PanelMode),
 }
 
@@ -709,15 +779,20 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
             }
             PanelStatusLineMessage::RemoveCharacterFromCommand => {
                 if let Some(cmd) = &self.current_command {
-                    if cmd.len() > 1 {
+                    if cmd.len() > 0 {
                         self.current_command = Some(String::from(&cmd[0..cmd.len() - 1]));
                     }
                 }
                 iced::Task::none()
             }
             PanelStatusLineMessage::CommitCurrentAction => {
-                self.current_command = None;
-                iced::Task::done(PanelStatusLineMessage::CurrentActionResponse)
+                if let Some(command) = &self.current_command {
+                    let cmd = command.clone();
+                    self.current_command = None;
+                    self.handle_buffer_command(&cmd[..])
+                } else {
+                    iced::Task::done(PanelStatusLineMessage::CurrentActionResponse(None))
+                }
             }
             PanelStatusLineMessage::DisplayMode(mode) => {
                 match mode {
@@ -731,7 +806,22 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
                 }
                 iced::Task::none()
             }
-            PanelStatusLineMessage::CurrentActionResponse => iced::Task::none(),
+            PanelStatusLineMessage::CurrentActionResponse(res) => match res {
+                None => iced::Task::none(),
+                Some(action_response) => match action_response {
+                    ActionResponse::FileOpenResult(res) => {
+                        match res {
+                            Ok(_) => {
+                                println!("TODO: Handle file open...");
+                            }
+                            Err(err) => {
+                                println!("Error: Failed to open file: {:?}", err);
+                            }
+                        }
+                        iced::Task::none()
+                    }
+                },
+            },
         }
     }
 
@@ -902,7 +992,7 @@ impl Component<PanelMessage> for Panel {
                 .update(buffer_message)
                 .map(|panel_response| PanelMessage::ProcessBufferEvent(panel_response)),
             PanelMessage::ProcessStatusLineEvent(status_message) => match status_message {
-                PanelStatusLineMessage::CurrentActionResponse => {
+                PanelStatusLineMessage::CurrentActionResponse(None) => {
                     iced::Task::done(PanelMessage::ModeTransition(PanelMode::Normal, None))
                 }
                 _ => self
