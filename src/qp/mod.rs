@@ -472,7 +472,17 @@ impl Component<BufferMessage> for BufferContent {
                     let (upper, lower) = self.data.split_at(self.cursor.row + 1);
 
                     let mut new_data = Vec::from(upper);
-                    new_data.push(String::new());
+
+                    // Split the current row at the column point and move the data to the right of cursor
+                    // to the next line.
+                    let new_line: String = {
+                      let (left, right) = upper[upper.len() - 1].split_at(self.cursor.col);
+                      let last_i = new_data.len() - 1;
+                      new_data[last_i] = String::from(&left[..]);
+                      String::from(&right[..])
+                    };
+
+                    new_data.push(new_line);
                     new_data.append(&mut Vec::from(lower));
 
                     self.data = new_data;
