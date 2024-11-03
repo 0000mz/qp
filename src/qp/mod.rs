@@ -1,3 +1,4 @@
+use core::str;
 use std::io::Read;
 
 use iced::advanced::layout;
@@ -379,6 +380,7 @@ impl std::fmt::Display for Cursor {
     }
 }
 
+#[derive(Debug, Clone)]
 struct BufferContent {
     data: Vec<String>,
     cursor: Cursor,
@@ -652,32 +654,6 @@ impl BufferContent {
     }
 }
 
-async fn open_file(filepath: Option<String>) -> Result<(), FileError> {
-    // TODO: Allow opening of relative paths. The path should be relative to the current workspace, once the
-    // workspace abstraction has been implemented.
-    if filepath.is_none() {
-        return Err(FileError::NoFileSpecified);
-    }
-    let path = std::path::Path::new(filepath.as_ref().unwrap());
-    println!("Opening file: {:?}", filepath);
-    if !path.exists() {
-        return Err(FileError::FileNotFound);
-    }
-
-    let mut file = match std::fs::File::open(&path) {
-        Err(_) => {
-            return Err(FileError::OpenError);
-        }
-        Ok(file) => file,
-    };
-
-    let mut file_buffer = Vec::new();
-    match file.read_to_end(&mut file_buffer) {
-        Err(_) => Err(FileError::ReadError),
-        Ok(_) => Ok(()),
-    }
-}
-
 struct PanelStatusLine {
     bounds: Rectangle,
     current_command: Option<String>,
@@ -718,14 +694,6 @@ impl PanelStatusLine {
         }
         iced::Task::done(PanelStatusLineMessage::UpstreamResponse(None))
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum FileError {
-    NoFileSpecified,
-    FileNotFound,
-    OpenError,
-    ReadError,
 }
 
 #[derive(Debug, Clone)]
@@ -816,8 +784,84 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct BufferSource {
+    // The filepath associated with the buffer source.
+    // It is guaranteed to exist at the time of creation.
+    filepath: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum FileError {
+    NoFileSpecified,
+    FileNotFound,
+    OpenError,
+    ReadError,
+}
+
+async fn open_file(filepath: Option<&String>) -> Result<(), FileError> {
+    // TODO: Allow opening of relative paths. The path should be relative to the current workspace, once the
+    // workspace abstraction has been implemented.
+    if filepath.is_none() {
+        return Err(FileError::NoFileSpecified);
+    }
+    let path = std::path::Path::new(filepath.as_ref().unwrap());
+    println!("Opening file: {:?}", filepath);
+    if !path.exists() {
+        return Err(FileError::FileNotFound);
+    }
+
+    match std::fs::File::open(&path) {
+        Err(_) => Err(FileError::OpenError),
+        Ok(_) => Ok(()),
+    }
+}
+
+async fn read_file(filepath: String) -> Result<Vec<String>, FileError> {
+    let path = std::path::Path::new(&filepath);
+    if !path.exists() {
+        return Err(FileError::FileNotFound);
+    }
+    let mut file = match std::fs::File::open(&path) {
+        Err(_) => {
+            return Err(FileError::OpenError);
+        }
+        Ok(file) => file,
+    };
+
+    let mut data = vec![];
+    match file.read_to_end(&mut data) {
+        Err(_) => Err(FileError::ReadError),
+        Ok(_) => match str::from_utf8(&data[..]) {
+            Err(_) => Err(FileError::OpenError),
+            Ok(v) => {
+                let data_str = String::from(v);
+                Ok(data_str
+                    .lines()
+                    .map(|e| String::from(e))
+                    .collect::<Vec<String>>())
+            }
+        },
+    }
+}
+
+impl BufferSource {
+    async fn open_file_and_create(filepath: String) -> Option<Self> {
+        match open_file(Some(&filepath)).await {
+            // TODO: Since we are no longer pre-fetching the data from the file and only
+            // requesting the content on a call to read(), this no longer needs to return
+            // an option and the open_file also does not need to be performed.
+            // Refactor this to reflect that change.
+            Ok(_) => Some(BufferSource { filepath }),
+            // TODO: Instead of returning an option, maybe forward the error result..
+            Err(_) => None,
+        }
+    }
+}
+
 struct Panel {
     buffer: BufferContent,
+    buffer_source: Option<BufferSource>,
     status_line: PanelStatusLine,
     mode: PanelMode,
 }
@@ -845,6 +889,8 @@ pub enum PanelMessage {
     ProcessBufferEvent(BufferMessage),
     ProcessStatusLineEvent(PanelStatusLineMessage),
     ModeTransition(PanelMode, Option<char>),
+    AttachBufferSource(Option<BufferSource>),
+    AtttachContentToBuffer(Result<Vec<String>, FileError>),
 }
 
 impl Panel {
@@ -864,6 +910,7 @@ impl Panel {
             buffer: BufferContent::new(buffer_size),
             status_line: PanelStatusLine::new(status_line_bounds),
             mode: PanelMode::Normal,
+            buffer_source: None,
         }
     }
 
@@ -983,20 +1030,20 @@ impl Component<PanelMessage> for Panel {
                     iced::Task::done(PanelMessage::ModeTransition(PanelMode::Normal, None))
                 }
                 PanelStatusLineMessage::UpstreamResponse(Some(upstream_message)) => {
-                    let tasks = vec![iced::Task::done(PanelMessage::ModeTransition(
+                    let mut tasks = vec![iced::Task::done(PanelMessage::ModeTransition(
                         PanelMode::Normal,
                         None,
                     ))];
                     match upstream_message {
-                        UpstreamedPanelMessage::ExecuteCommand(command) => {
-                            match command {
-                                PanelCommand::OpenFile(None) => {}
-                                PanelCommand::OpenFile(Some(file)) => {
-                                    // TODO: open the file.
-                                    println!("Open file: {}", file);
-                                }
+                        UpstreamedPanelMessage::ExecuteCommand(command) => match command {
+                            PanelCommand::OpenFile(None) => {}
+                            PanelCommand::OpenFile(Some(file)) => {
+                                tasks.push(iced::Task::perform(
+                                    BufferSource::open_file_and_create(*file),
+                                    PanelMessage::AttachBufferSource,
+                                ));
                             }
-                        }
+                        },
                     }
 
                     iced::Task::batch(tasks)
@@ -1006,6 +1053,35 @@ impl Component<PanelMessage> for Panel {
                     .update(status_message)
                     .map(|response| PanelMessage::ProcessStatusLineEvent(response)),
             },
+            PanelMessage::AttachBufferSource(buffer_source) => {
+                match buffer_source {
+                    None => {
+                        println!("Failed to attach a buffer source to the panel.");
+                    }
+                    Some(buffersrc) => {
+                        println!("Attached a buffersrc to the panel.");
+                        let filepath = buffersrc.filepath.clone();
+                        self.buffer_source = Some(buffersrc);
+                        return iced::Task::perform(
+                            read_file(filepath),
+                            PanelMessage::AtttachContentToBuffer,
+                        );
+                    }
+                }
+                iced::Task::none()
+            }
+            PanelMessage::AtttachContentToBuffer(content) => {
+                match content {
+                    Err(e) => {
+                        println!("Failed to get content: {:?}", e);
+                    }
+                    Ok(content) => {
+                        self.buffer.data = content;
+                        self.buffer.cursor = Cursor { row: 0, col: 0 };
+                    }
+                }
+                iced::Task::none()
+            }
             PanelMessage::ModeTransition(new_mode, input_buffer_opt) => {
                 self.mode = new_mode;
 
