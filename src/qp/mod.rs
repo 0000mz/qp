@@ -388,12 +388,21 @@ struct BufferContent {
     size: iced::Size,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
+pub enum CursorAxisMod {
+    // Move the cursor horizontally by the delta, clamped to the current row's limits.
+    HorizontalCursorDelta(i32 /* col_delta */),
+    // Insert a new row `row_delta` away from the current row and move the cursor
+    // to that newly inserted row.
+    InsertRowAndMoveDelta(i32 /* row_delta */),
+}
+
+#[derive(Debug, Clone)]
 pub enum BufferMessage<AsciiCode = u8> {
     AddCharacter(AsciiCode),
     RemoveCharacter,
     CommitAction(iced::keyboard::key::Named),
-    HorizontalCursorDelta(i32),
+    CursorAxisMod(CursorAxisMod),
 }
 
 #[derive(Debug)]
@@ -562,13 +571,38 @@ impl Component<BufferMessage> for BufferContent {
                 }
                 _ => {}
             },
-            BufferMessage::HorizontalCursorDelta(delta) => {
-                let new_col = (self.cursor.col as i32) + delta;
-                if new_col >= 0 {
-                    let new_col = new_col as usize;
-                    self.cursor.col = std::cmp::min(new_col, self.data[self.cursor.row].len());
+            BufferMessage::CursorAxisMod(modfier) => match modfier {
+                CursorAxisMod::HorizontalCursorDelta(delta) => {
+                    let new_col = (self.cursor.col as i32) + delta;
+                    if new_col >= 0 {
+                        let new_col = new_col as usize;
+                        self.cursor.col = std::cmp::min(new_col, self.data[self.cursor.row].len());
+                    }
                 }
-            }
+                CursorAxisMod::InsertRowAndMoveDelta(delta) => {
+                    if delta == 1 {
+                        let (upper, lower) = self.data.split_at(self.cursor.row + 1);
+                        let mut new_data = Vec::from(upper);
+                        new_data.push(String::new());
+                        new_data.append(&mut Vec::from(lower));
+
+                        self.data = new_data;
+                        self.cursor.row += 1;
+                        self.cursor.col = 0;
+                    } else if delta == -1 {
+                        let (upper, lower) = self.data.split_at(self.cursor.row);
+                        let mut new_data = Vec::from(upper);
+                        new_data.push(String::new());
+                        new_data.append(&mut Vec::from(lower));
+
+                        self.data = new_data;
+                        // cursor should stay in same position. The inserted row should account for the delta.
+                        self.cursor.col = 0;
+                    } else {
+                        panic!("Non-singular delta for CursorAxisMod::InsertRowAndMoveDelta not implemented.");
+                    }
+                }
+            },
         }
         iced::Task::none()
     }
@@ -961,19 +995,9 @@ pub enum UpstreamedPanelMessage {
 }
 
 #[derive(Debug, Clone)]
-pub enum BufferCommandTranstion {
-    // Enter buffer comamnd insert mode with append transformation.
-    // This should move the cursor to the next character instead of
-    // starting insert from current character.
-    EnterInAppend,
-    // Normal insert mode. No transformation made on the buffer.
-    EnterInInsert,
-}
-
-#[derive(Debug, Clone)]
 pub enum ModeTransitionPayload {
     Char(char),
-    InsertModePayload(BufferCommandTranstion),
+    InsertModePayload(CursorAxisMod),
     None,
 }
 
@@ -1062,7 +1086,7 @@ impl Component<PanelMessage> for Panel {
                                 self.mode,
                                 PanelMode::Insert,
                                 ModeTransitionPayload::InsertModePayload(
-                                    BufferCommandTranstion::EnterInInsert,
+                                    CursorAxisMod::HorizontalCursorDelta(0),
                                 ),
                             ));
                         }
@@ -1071,7 +1095,25 @@ impl Component<PanelMessage> for Panel {
                                 self.mode,
                                 PanelMode::Insert,
                                 ModeTransitionPayload::InsertModePayload(
-                                    BufferCommandTranstion::EnterInAppend,
+                                    CursorAxisMod::HorizontalCursorDelta(1),
+                                ),
+                            ));
+                        }
+                        'o' => {
+                            return Some(PanelMessage::ModeTransition(
+                                self.mode,
+                                PanelMode::Insert,
+                                ModeTransitionPayload::InsertModePayload(
+                                    CursorAxisMod::InsertRowAndMoveDelta(1),
+                                ),
+                            ));
+                        }
+                        'O' => {
+                            return Some(PanelMessage::ModeTransition(
+                                self.mode,
+                                PanelMode::Insert,
+                                ModeTransitionPayload::InsertModePayload(
+                                    CursorAxisMod::InsertRowAndMoveDelta(-1),
                                 ),
                             ));
                         }
@@ -1233,16 +1275,9 @@ impl Component<PanelMessage> for Panel {
                         )));
                     }
                     ModeTransitionPayload::InsertModePayload(payload) => {
-                        match payload {
-                            BufferCommandTranstion::EnterInAppend => {
-                                tasks.push(iced::Task::done(PanelMessage::ProcessBufferEvent(
-                                    BufferMessage::HorizontalCursorDelta(1),
-                                )));
-                            }
-                            // When EnterInInsert is received, nothing extra needs to be done. The mode is already changed to
-                            // insert and any future keys will be forwarded to the right buffer.
-                            BufferCommandTranstion::EnterInInsert => {}
-                        };
+                        tasks.push(iced::Task::done(PanelMessage::ProcessBufferEvent(
+                            BufferMessage::CursorAxisMod(payload),
+                        )));
                     }
                     ModeTransitionPayload::None => {}
                 }
