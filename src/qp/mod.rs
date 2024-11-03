@@ -788,7 +788,7 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
 pub struct BufferSource {
     // The filepath associated with the buffer source.
     // It is guaranteed to exist at the time of creation.
-    filepath: String,
+    filepath: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -797,32 +797,59 @@ pub enum FileError {
     FileNotFound,
     OpenError,
     ReadError,
+    // This should be used to communicate unsupported file types, such as
+    // directories. Not the same as `FileNotFound`.
+    NotANormalFile,
 }
 
-async fn open_file(filepath: Option<&String>) -> Result<(), FileError> {
-    // TODO: Allow opening of relative paths. The path should be relative to the current workspace, once the
-    // workspace abstraction has been implemented.
+async fn open_relative_file(filepath: Option<&String>) -> Result<std::path::PathBuf, FileError> {
+    match filepath {
+        None => Err(FileError::NoFileSpecified),
+        Some(filepath) => match std::env::current_dir() {
+            Err(_) => {
+                return Err(FileError::FileNotFound);
+            }
+            Ok(cwd) => {
+                let path = std::path::Path::new(&filepath);
+                let relative_path = cwd.as_path().join(path);
+                if relative_path.exists() {
+                    if relative_path.is_file() {
+                        Ok(relative_path)
+                    } else {
+                        Err(FileError::NotANormalFile)
+                    }
+                } else {
+                    Err(FileError::FileNotFound)
+                }
+            }
+        },
+    }
+}
+
+async fn open_file(filepath: Option<&String>) -> Result<std::path::PathBuf, FileError> {
     if filepath.is_none() {
         return Err(FileError::NoFileSpecified);
     }
-    let path = std::path::Path::new(filepath.as_ref().unwrap());
+    let path = std::path::PathBuf::from(filepath.as_ref().unwrap());
     println!("Opening file: {:?}", filepath);
     if !path.exists() {
-        return Err(FileError::FileNotFound);
+        return open_relative_file(filepath).await;
+    }
+    if !path.is_file() {
+        return Err(FileError::NotANormalFile);
     }
 
     match std::fs::File::open(&path) {
         Err(_) => Err(FileError::OpenError),
-        Ok(_) => Ok(()),
+        Ok(_) => Ok(path),
     }
 }
 
-async fn read_file(filepath: String) -> Result<Vec<String>, FileError> {
-    let path = std::path::Path::new(&filepath);
-    if !path.exists() {
+async fn read_file(filepath: std::path::PathBuf) -> Result<Vec<String>, FileError> {
+    if !filepath.exists() {
         return Err(FileError::FileNotFound);
     }
-    let mut file = match std::fs::File::open(&path) {
+    let mut file = match std::fs::File::open(&filepath) {
         Err(_) => {
             return Err(FileError::OpenError);
         }
@@ -852,7 +879,9 @@ impl BufferSource {
             // requesting the content on a call to read(), this no longer needs to return
             // an option and the open_file also does not need to be performed.
             // Refactor this to reflect that change.
-            Ok(_) => Some(BufferSource { filepath }),
+            Ok(filepath_buf) => Some(BufferSource {
+                filepath: filepath_buf,
+            }),
             // TODO: Instead of returning an option, maybe forward the error result..
             Err(_) => None,
         }
