@@ -693,8 +693,8 @@ impl PanelStatusLine {
         }
     }
 
-    fn handle_buffer_command(&self, command: &str) -> iced::Task<PanelStatusLineMessage> {
-        println!("handeling buffer command: [{}]", command);
+    fn translate_buffer_command(&self, command: &str) -> iced::Task<PanelStatusLineMessage> {
+        println!("translating buffer command: [{}]", command);
         let parts = command
             .split_whitespace()
             .map(|s| String::from(s))
@@ -704,22 +704,19 @@ impl PanelStatusLine {
         }
         match &parts[0][..] {
             "o" => {
-                return iced::Task::perform(
-                    open_file(if parts.len() == 2 {
-                        Some(parts[1].clone())
-                    } else {
-                        None
-                    }),
-                    |res| {
-                        PanelStatusLineMessage::CurrentActionResponse(Some(
-                            ActionResponse::FileOpenResult(res),
-                        ))
-                    },
-                );
+                return iced::Task::done(PanelStatusLineMessage::UpstreamResponse(Some(
+                    UpstreamedPanelMessage::ExecuteCommand(PanelCommand::OpenFile(
+                        if parts.len() == 2 {
+                            Some(Box::new(String::from(&parts[1][..])))
+                        } else {
+                            None
+                        },
+                    )),
+                )));
             }
             _ => {}
         }
-        iced::Task::none()
+        iced::Task::done(PanelStatusLineMessage::UpstreamResponse(None))
     }
 }
 
@@ -731,18 +728,13 @@ pub enum FileError {
     ReadError,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum ActionResponse {
-    FileOpenResult(Result<(), FileError>),
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum PanelStatusLineMessage {
     ProcessKeyInput(char),
     RemoveCharacterFromCommand,
     CommitCurrentAction,
-    CurrentActionResponse(Option<ActionResponse>),
     DisplayMode(PanelMode),
+    UpstreamResponse(Option<UpstreamedPanelMessage>),
 }
 
 impl Component<PanelStatusLineMessage> for PanelStatusLine {
@@ -769,6 +761,7 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
 
     fn update(&mut self, message: PanelStatusLineMessage) -> iced::Task<PanelStatusLineMessage> {
         match message {
+            PanelStatusLineMessage::UpstreamResponse(_) => unreachable!(),
             PanelStatusLineMessage::ProcessKeyInput(c) => {
                 if self.current_command.is_none() {
                     self.current_command = Some(String::new());
@@ -789,9 +782,9 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
                 if let Some(command) = &self.current_command {
                     let cmd = command.clone();
                     self.current_command = None;
-                    self.handle_buffer_command(&cmd[..])
+                    self.translate_buffer_command(&cmd[..])
                 } else {
-                    iced::Task::done(PanelStatusLineMessage::CurrentActionResponse(None))
+                    iced::Task::done(PanelStatusLineMessage::UpstreamResponse(None))
                 }
             }
             PanelStatusLineMessage::DisplayMode(mode) => {
@@ -806,22 +799,6 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
                 }
                 iced::Task::none()
             }
-            PanelStatusLineMessage::CurrentActionResponse(res) => match res {
-                None => iced::Task::none(),
-                Some(action_response) => match action_response {
-                    ActionResponse::FileOpenResult(res) => {
-                        match res {
-                            Ok(_) => {
-                                println!("TODO: Handle file open...");
-                            }
-                            Err(err) => {
-                                println!("Error: Failed to open file: {:?}", err);
-                            }
-                        }
-                        iced::Task::none()
-                    }
-                },
-            },
         }
     }
 
@@ -852,7 +829,17 @@ pub enum PanelMode {
     StatusCommand,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Debug)]
+pub enum PanelCommand {
+    OpenFile(Option<Box<String>>),
+}
+
+#[derive(Debug, Clone)]
+pub enum UpstreamedPanelMessage {
+    ExecuteCommand(PanelCommand),
+}
+
+#[derive(Debug, Clone)]
 pub enum PanelMessage {
     ProcessKeyInput(char),
     ProcessBufferEvent(BufferMessage),
@@ -992,8 +979,27 @@ impl Component<PanelMessage> for Panel {
                 .update(buffer_message)
                 .map(|panel_response| PanelMessage::ProcessBufferEvent(panel_response)),
             PanelMessage::ProcessStatusLineEvent(status_message) => match status_message {
-                PanelStatusLineMessage::CurrentActionResponse(None) => {
+                PanelStatusLineMessage::UpstreamResponse(None) => {
                     iced::Task::done(PanelMessage::ModeTransition(PanelMode::Normal, None))
+                }
+                PanelStatusLineMessage::UpstreamResponse(Some(upstream_message)) => {
+                    let tasks = vec![iced::Task::done(PanelMessage::ModeTransition(
+                        PanelMode::Normal,
+                        None,
+                    ))];
+                    match upstream_message {
+                        UpstreamedPanelMessage::ExecuteCommand(command) => {
+                            match command {
+                                PanelCommand::OpenFile(None) => {}
+                                PanelCommand::OpenFile(Some(file)) => {
+                                    // TODO: open the file.
+                                    println!("Open file: {}", file);
+                                }
+                            }
+                        }
+                    }
+
+                    iced::Task::batch(tasks)
                 }
                 _ => self
                     .status_line
@@ -1030,7 +1036,7 @@ impl Component<PanelMessage> for Panel {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum EditorMessage<Key = iced::keyboard::Key, Modifier = iced::keyboard::Modifiers> {
     // Open an empty buffer in the editor.
     OpenPanel(iced::Size),
