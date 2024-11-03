@@ -102,9 +102,9 @@ where
         );
 
         let mode_str = if let Some(cmd) = &self.command {
-          String::from(':') + cmd
+            String::from(':') + cmd
         } else {
-          self.mode.clone()
+            self.mode.clone()
         };
 
         let mode_str_len = mode_str.len();
@@ -680,18 +680,17 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
         match message {
             PanelStatusLineMessage::ProcessKeyInput(c) => {
                 if self.current_command.is_none() {
-                  self.current_command = Some(String::new());
+                    self.current_command = Some(String::new());
                 } else {
-                self.current_command.as_mut().unwrap().push(c);
+                    self.current_command.as_mut().unwrap().push(c);
                 }
                 iced::Task::none()
             }
             PanelStatusLineMessage::RemoveCharacterFromCommand => {
                 if let Some(cmd) = &self.current_command {
-                if cmd.len() > 1 {
-                    self.current_command =
-                        Some(String::from(&cmd[0..cmd.len() - 1]));
-                }
+                    if cmd.len() > 1 {
+                        self.current_command = Some(String::from(&cmd[0..cmd.len() - 1]));
+                    }
                 }
                 iced::Task::none()
             }
