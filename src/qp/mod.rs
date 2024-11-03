@@ -40,12 +40,12 @@ pub struct StatusLineRender {
     y: f32,
     width: f32,
     height: f32,
-    command: String,
+    command: Option<String>,
     mode: String,
 }
 
 impl StatusLineRender {
-    fn new(x: f32, y: f32, width: f32, height: f32, command: String, mode: String) -> Self {
+    fn new(x: f32, y: f32, width: f32, height: f32, command: Option<String>, mode: String) -> Self {
         StatusLineRender {
             x,
             y,
@@ -101,11 +101,12 @@ where
             Color::from_rgb(0.0, 0.0, 0.5),
         );
 
-        let mode_str = if self.command.len() == 0 {
-            self.mode.clone()
+        let mode_str = if let Some(cmd) = &self.command {
+          String::from(':') + cmd
         } else {
-            self.command.clone()
+          self.mode.clone()
         };
+
         let mode_str_len = mode_str.len();
         let mode_text = iced::advanced::Text {
             content: mode_str,
@@ -630,7 +631,7 @@ impl BufferContent {
 
 struct PanelStatusLine {
     bounds: Rectangle,
-    current_command: String,
+    current_command: Option<String>,
     mode_string: String,
 }
 
@@ -638,7 +639,7 @@ impl PanelStatusLine {
     fn new(bounds: Rectangle) -> Self {
         PanelStatusLine {
             bounds,
-            current_command: String::new(),
+            current_command: None,
             mode_string: String::from("NORMAL"),
         }
     }
@@ -678,19 +679,24 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
     fn update(&mut self, message: PanelStatusLineMessage) -> iced::Task<PanelStatusLineMessage> {
         match message {
             PanelStatusLineMessage::ProcessKeyInput(c) => {
-                self.current_command.push(c);
+                if self.current_command.is_none() {
+                  self.current_command = Some(String::new());
+                } else {
+                self.current_command.as_mut().unwrap().push(c);
+                }
                 iced::Task::none()
             }
             PanelStatusLineMessage::RemoveCharacterFromCommand => {
-                if self.current_command.len() > 1 {
+                if let Some(cmd) = &self.current_command {
+                if cmd.len() > 1 {
                     self.current_command =
-                        String::from(&self.current_command[0..self.current_command.len() - 1]);
+                        Some(String::from(&cmd[0..cmd.len() - 1]));
+                }
                 }
                 iced::Task::none()
             }
             PanelStatusLineMessage::CommitCurrentAction => {
-                println!("TODO: Commit action: {}", self.current_command);
-                self.current_command = String::new();
+                self.current_command = None;
                 iced::Task::done(PanelStatusLineMessage::CurrentActionResponse)
             }
             PanelStatusLineMessage::DisplayMode(mode) => {
