@@ -486,7 +486,28 @@ impl Component<BufferMessage> for BufferContent {
                             String::from(&left_side_ref[..left_side_ref.len() - 1])
                                 + right_side_ref;
                         self.cursor.col -= 1;
+                    } else {
+                        // Move the whole line into the previous line and update the cursor.
+                        let (upper, lower) = self.data.split_at(self.cursor.row);
+                        if upper.len() > 0 && lower.len() > 0 {
+                            let line_above = &upper[upper.len() - 1];
+                            let curr_line = &lower[0];
+                            let new_col = line_above.len();
+
+                            let combined_line = String::from(line_above) + curr_line;
+
+                            let mut new_data = Vec::from(&upper[..upper.len() - 1]);
+                            new_data.push(combined_line);
+                            new_data.append(&mut Vec::from(&lower[1..]));
+
+                            self.data = new_data;
+                            self.cursor.row -= 1;
+                            self.cursor.col = new_col;
+                        }
                     }
+                } else if self.cursor.row > 0 {
+                    self.cursor.row -= 1;
+                    self.cursor.col = self.data[self.cursor.row].len()
                 }
             }
             BufferMessage::CommitAction(action) => match action {
