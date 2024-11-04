@@ -586,7 +586,6 @@ impl Component<BufferMessage> for BufferContent {
             BufferMessage::CommitAction(action) => {
                 match action {
                     iced::keyboard::key::Named::Enter => {
-                        self.ensure_cursor();
                         let (upper, lower) = self.data.split_at(self.cursor.row + 1);
 
                         let mut new_data = Vec::from(upper);
@@ -708,7 +707,6 @@ impl BufferContent {
 
     fn add_character(&mut self, ascii_code: u8) {
         println!("-> Adding character: {}", ascii_code);
-        self.ensure_cursor();
 
         let row = &self.data[self.cursor.row];
         let (left, right) = row.split_at(self.cursor.col);
@@ -719,14 +717,6 @@ impl BufferContent {
 
         self.data[self.cursor.row] = new_row;
         self.cursor.col += 1;
-    }
-
-    fn ensure_cursor(&mut self) {
-        if self.data.len() == 0 {
-            self.data.push(String::new());
-        }
-        let new_row_i = std::cmp::min(self.cursor.row, self.data.len() - 1);
-        self.cursor.row = new_row_i;
     }
 
     fn handle_ascii_keypress(key: char, modifier: Option<KeyModifier>) -> Option<BufferMessage> {
