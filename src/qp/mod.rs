@@ -39,18 +39,17 @@ impl GridSpaceUtil {
     }
 }
 
-pub struct StatusLineRender {
+pub struct StatusLineRender<'a> {
     x: f32,
     y: f32,
     width: f32,
     height: f32,
     command: Option<String>,
     mode: String,
-    // TODO: Pass by reference instead of value.
-    cursor: Cursor,
+    cursor: &'a Cursor,
 }
 
-impl StatusLineRender {
+impl<'a> StatusLineRender<'a> {
     fn new(
         x: f32,
         y: f32,
@@ -58,7 +57,7 @@ impl StatusLineRender {
         height: f32,
         command: Option<String>,
         mode: String,
-        cursor: Cursor,
+        cursor: &'a Cursor,
     ) -> Self {
         StatusLineRender {
             x,
@@ -72,7 +71,7 @@ impl StatusLineRender {
     }
 }
 
-impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for StatusLineRender
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for StatusLineRender<'_>
 where
     Renderer: renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font>,
 {
@@ -191,11 +190,12 @@ where
     }
 }
 
-impl<'a, Message, Theme, Renderer> From<StatusLineRender> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message, Theme, Renderer> From<StatusLineRender<'a>>
+    for Element<'a, Message, Theme, Renderer>
 where
     Renderer: renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font>,
 {
-    fn from(el: StatusLineRender) -> Self {
+    fn from(el: StatusLineRender<'a>) -> Self {
         Self::new(el)
     }
 }
@@ -917,7 +917,7 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
             // TODO: Pass by reference.
             self.current_command.clone(),
             self.mode_string.clone(),
-            self.cursor.clone(),
+            &self.cursor,
         )
         .into()
     }
