@@ -248,7 +248,81 @@ where
     }
 }
 
+pub struct TabLineRenderer {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+impl TabLineRenderer {
+    fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        TabLineRenderer {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+}
+
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for TabLineRenderer
+where
+    Renderer: renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font>,
+{
+    fn size(&self) -> Size<iced::Length> {
+        Size {
+            width: Length::Shrink,
+            height: Length::Shrink,
+        }
+    }
+
+    fn layout(
+        &self,
+        _tree: &mut Tree,
+        _renderer: &Renderer,
+        _limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::Node::new(Size::new(self.width, self.height))
+    }
+
+    fn draw(
+        &self,
+        _state: &Tree,
+        renderer: &mut Renderer,
+        _theme: &Theme,
+        _stype: &renderer::Style,
+        _layout: layout::Layout<'_>,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: Rectangle {
+                    x: self.x,
+                    y: self.y,
+                    width: self.width,
+                    height: self.height,
+                },
+                ..renderer::Quad::default()
+            },
+            Color::from_rgb(0.0, 0.2, 0.2),
+        );
+    }
+}
+
+impl<'a, Message, Theme, Renderer> From<TabLineRenderer> for Element<'a, Message, Theme, Renderer>
+where
+    Renderer: renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font>,
+{
+    fn from(el: TabLineRenderer) -> Self {
+        Self::new(el)
+    }
+}
+
 pub struct CodeSpace<'a> {
+    x: f32,
+    y: f32,
     width: f32,
     height: f32,
     buffer_iter: BufferContentIterator<'a>,
@@ -260,12 +334,16 @@ impl<'a> CodeSpace<'a> {
     const LINE_NB_DIGITS: usize = 3;
 
     fn new(
+        x: f32,
+        y: f32,
         width: f32,
         height: f32,
         buffer_iter: BufferContentIterator<'a>,
         cursor: &'a Cursor,
     ) -> Self {
         CodeSpace {
+            x,
+            y,
             width,
             height,
             buffer_iter,
@@ -298,6 +376,7 @@ impl<'a> CodeSpace<'a> {
         c: char,
     ) {
         let (x, y) = GridSpaceUtil::cell_to_pixel_space(row, col);
+        let (x, y) = (x + self.x, y + self.y);
         let cellw: f32 = GridSpaceUtil::CELL_WIDTH as f32;
         let cellh: f32 = GridSpaceUtil::CELL_HEIGHT as f32;
         let bounds = Rectangle {
@@ -352,13 +431,18 @@ where
         renderer: &mut Renderer,
         _theme: &Theme,
         _stype: &renderer::Style,
-        layout: layout::Layout<'_>,
+        _layout: layout::Layout<'_>,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
         renderer.fill_quad(
             renderer::Quad {
-                bounds: layout.bounds(),
+                bounds: Rectangle {
+                    x: self.x,
+                    y: self.y,
+                    width: self.width,
+                    height: self.height,
+                },
                 ..renderer::Quad::default()
             },
             Color::from_rgb(0.2, 0.2, 0.2),
@@ -394,8 +478,8 @@ where
             let (_, cursor_y) =
                 GridSpaceUtil::cell_to_pixel_space(self.cursor.row, self.cursor.col);
             let bounds = Rectangle {
-                x: 0.0,
-                y: cursor_y,
+                x: self.x,
+                y: cursor_y + self.y,
                 width: self.width,
                 height: cellh,
             };
@@ -414,8 +498,8 @@ where
             let (x, y) = GridSpaceUtil::cell_to_pixel_space(row, col);
 
             let bounds = Rectangle {
-                x,
-                y,
+                x: x + self.x,
+                y: y + self.y,
                 width: cellw,
                 height: cellh,
             };
@@ -444,8 +528,8 @@ where
             let (row, col) = CodeSpace::nb_ofsetted_row_cols(self.cursor.row, self.cursor.col);
             let (cursor_x, cursor_y) = GridSpaceUtil::cell_to_pixel_space(row, col);
             let cursor_bounds = Rectangle {
-                x: cursor_x,
-                y: cursor_y,
+                x: cursor_x + self.x,
+                y: cursor_y + self.y,
                 width: cellw,
                 height: cellh,
             };
@@ -485,7 +569,7 @@ impl std::fmt::Display for Cursor {
 struct BufferContent {
     data: Vec<String>,
     cursor: Cursor,
-    size: iced::Size,
+    bounds: Rectangle,
 }
 
 #[derive(Debug, Clone)]
@@ -768,8 +852,10 @@ impl Component<BufferMessage> for BufferContent {
 
     fn view(&self) -> iced::Element<'_, EditorMessage> {
         iced::widget::container(CodeSpace::new(
-            self.size.width,
-            self.size.height,
+            self.bounds.x,
+            self.bounds.y,
+            self.bounds.width,
+            self.bounds.height,
             BufferContentIterator::new(self),
             &self.cursor,
         ))
@@ -778,11 +864,11 @@ impl Component<BufferMessage> for BufferContent {
 }
 
 impl BufferContent {
-    fn new(size: iced::Size) -> Self {
+    fn new(bounds: Rectangle) -> Self {
         BufferContent {
             data: vec![String::new()],
             cursor: Cursor { row: 0, col: 0 },
-            size,
+            bounds,
         }
     }
 
@@ -1151,10 +1237,49 @@ impl BufferSource {
     }
 }
 
+struct TabLine {
+    bounds: Rectangle,
+}
+
+#[derive(Debug, Clone)]
+enum TabLineMessage {}
+
+impl TabLine {
+    fn new(bounds: Rectangle) -> Self {
+        TabLine { bounds }
+    }
+}
+
+impl Component<TabLineMessage> for TabLine {
+    fn handle_key_event(
+        &self,
+        _key: iced::keyboard::Key,
+        _modified_key: iced::keyboard::Key,
+        _modifiers: iced::keyboard::Modifiers,
+    ) -> Option<TabLineMessage> {
+        None
+    }
+
+    fn update(&mut self, _message: TabLineMessage) -> iced::Task<TabLineMessage> {
+        iced::Task::none()
+    }
+
+    fn view(&self) -> iced::Element<'_, EditorMessage> {
+        TabLineRenderer::new(
+            self.bounds.x,
+            self.bounds.y,
+            self.bounds.width,
+            self.bounds.height,
+        )
+        .into()
+    }
+}
+
 struct Panel {
     buffer: BufferContent,
     buffer_source: Option<BufferSource>,
     status_line: PanelStatusLine,
+    tab_line: TabLine,
     mode: PanelMode,
     shortcut_buffer: String,
     shortcut_initiators: std::collections::HashSet<char>,
@@ -1208,19 +1333,30 @@ pub enum PanelMessage {
 impl Panel {
     fn new(size: iced::Size) -> Self {
         let status_line_height = 20.0;
-        let buffer_size = iced::Size {
-            height: size.height - status_line_height,
-            ..size
+        let tab_line_height = 20.0;
+
+        let tab_line_bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: size.width,
+            height: tab_line_height,
+        };
+        let buffer_bounds = Rectangle {
+            x: 0.0,
+            y: tab_line_bounds.height,
+            width: size.width,
+            height: size.height - status_line_height - tab_line_height,
         };
         let status_line_bounds = Rectangle {
             x: 0.0,
-            y: buffer_size.height,
+            y: tab_line_bounds.height + buffer_bounds.height,
             width: size.width,
             height: status_line_height,
         };
         Panel {
-            buffer: BufferContent::new(buffer_size),
+            buffer: BufferContent::new(buffer_bounds),
             status_line: PanelStatusLine::new(status_line_bounds),
+            tab_line: TabLine::new(tab_line_bounds),
             mode: PanelMode::Normal,
             buffer_source: None,
             shortcut_buffer: String::new(),
@@ -1578,7 +1714,12 @@ impl Component<PanelMessage> for Panel {
     }
 
     fn view(&self) -> iced::Element<'_, EditorMessage> {
-        iced::widget::column![self.buffer.view(), self.status_line.view()].into()
+        iced::widget::column![
+            self.tab_line.view(),
+            self.buffer.view(),
+            self.status_line.view()
+        ]
+        .into()
     }
 }
 
