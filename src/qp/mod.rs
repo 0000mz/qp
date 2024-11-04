@@ -44,9 +44,10 @@ pub struct StatusLineRender<'a> {
     y: f32,
     width: f32,
     height: f32,
-    command: Option<String>,
-    mode: String,
+    command: &'a Option<String>,
+    mode: &'a String,
     cursor: &'a Cursor,
+    shortcut: &'a String,
 }
 
 impl<'a> StatusLineRender<'a> {
@@ -55,9 +56,10 @@ impl<'a> StatusLineRender<'a> {
         y: f32,
         width: f32,
         height: f32,
-        command: Option<String>,
-        mode: String,
+        command: &'a Option<String>,
+        mode: &'a String,
         cursor: &'a Cursor,
+        shortcut: &'a String,
     ) -> Self {
         StatusLineRender {
             x,
@@ -67,6 +69,7 @@ impl<'a> StatusLineRender<'a> {
             command,
             mode,
             cursor,
+            shortcut,
         }
     }
 }
@@ -149,43 +152,88 @@ where
 
         // Right side text
         {
-            let right_bounds = Rectangle {
-                x: self.x + self.width / 2.0,
-                y: self.y,
-                width: self.width / 2.0,
-                height: self.height,
-            };
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: right_bounds,
-                    ..renderer::Quad::default()
-                },
-                Color::from_rgb(0.2, 0.0, 0.0),
-            );
-
-            let right_text = iced::advanced::Text {
-                content: self.cursor.row.to_string() + ":" + self.cursor.col.to_string().as_ref(),
-                bounds: Size {
-                    width: right_bounds.width,
-                    height: GridSpaceUtil::CELL_HEIGHT as f32,
-                },
-                size: iced::Pixels(GridSpaceUtil::TEXT_SIZE as f32),
-                line_height: iced::advanced::text::LineHeight::default(),
-                font: iced::Font::MONOSPACE,
-                horizontal_alignment: iced::Right,
-                vertical_alignment: iced::Top,
-                shaping: iced::advanced::text::Shaping::Basic,
-                wrapping: iced::advanced::text::Wrapping::None,
-            };
-            renderer.fill_text(
-                right_text,
-                iced::Point {
-                    x: self.x + self.width,
+            // draw "row:col"
+            {
+                let right_bounds = Rectangle {
+                    x: self.x + self.width / 2.0,
                     y: self.y,
-                },
-                Color::WHITE,
-                right_bounds,
-            );
+                    width: self.width / 2.0,
+                    height: self.height,
+                };
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: right_bounds,
+                        ..renderer::Quad::default()
+                    },
+                    Color::from_rgb(0.2, 0.0, 0.0),
+                );
+
+                let right_text = iced::advanced::Text {
+                    content: self.cursor.row.to_string()
+                        + ":"
+                        + self.cursor.col.to_string().as_ref(),
+                    bounds: Size {
+                        width: right_bounds.width,
+                        height: GridSpaceUtil::CELL_HEIGHT as f32,
+                    },
+                    size: iced::Pixels(GridSpaceUtil::TEXT_SIZE as f32),
+                    line_height: iced::advanced::text::LineHeight::default(),
+                    font: iced::Font::MONOSPACE,
+                    horizontal_alignment: iced::Right,
+                    vertical_alignment: iced::Top,
+                    shaping: iced::advanced::text::Shaping::Basic,
+                    wrapping: iced::advanced::text::Wrapping::None,
+                };
+                renderer.fill_text(
+                    right_text,
+                    iced::Point {
+                        x: right_bounds.x + right_bounds.width,
+                        y: right_bounds.y,
+                    },
+                    Color::WHITE,
+                    right_bounds,
+                );
+            }
+            {
+                // draw shortcut buffer
+                let offset = 60.0;
+                let rbounds = Rectangle {
+                    x: self.x + self.width / 2.0,
+                    y: self.y,
+                    width: self.width / 2.0 - offset,
+                    height: self.height,
+                };
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: rbounds,
+                        ..renderer::Quad::default()
+                    },
+                    Color::from_rgb(0.0, 0.2, 0.0),
+                );
+                let text = iced::advanced::Text {
+                    content: self.shortcut.clone(),
+                    bounds: Size {
+                        width: rbounds.width,
+                        height: GridSpaceUtil::CELL_HEIGHT as f32,
+                    },
+                    size: iced::Pixels(GridSpaceUtil::TEXT_SIZE as f32),
+                    line_height: iced::advanced::text::LineHeight::default(),
+                    font: iced::Font::MONOSPACE,
+                    horizontal_alignment: iced::Right,
+                    vertical_alignment: iced::Top,
+                    shaping: iced::advanced::text::Shaping::Basic,
+                    wrapping: iced::advanced::text::Wrapping::None,
+                };
+                renderer.fill_text(
+                    text,
+                    iced::Point {
+                        x: rbounds.x + rbounds.width,
+                        y: rbounds.y,
+                    },
+                    Color::WHITE,
+                    rbounds,
+                );
+            }
         }
     }
 }
@@ -450,6 +498,16 @@ pub enum CursorAxisMod {
 }
 
 #[derive(Debug, Clone)]
+pub enum BufferCursorNavigation {
+    TopOfBuffer,
+    BottomOfBuffer,
+    // Not just the beginning of the line. The first character within the line,
+    // skipping all whitespaces.
+    BeginningCharOfLine,
+    EndCharOfLine,
+}
+
+#[derive(Debug, Clone)]
 pub enum BufferMessage<AsciiCode = u8> {
     AddCharacter(AsciiCode),
     AddCharacters(Vec<AsciiCode>),
@@ -457,6 +515,7 @@ pub enum BufferMessage<AsciiCode = u8> {
     CommitAction(iced::keyboard::key::Named),
     CursorAxisMod(CursorAxisMod),
     UpstreamResponse(UpstreamedPanelMessage),
+    CursorNavigateComamnd(BufferCursorNavigation),
 }
 
 #[derive(Debug)]
@@ -533,6 +592,39 @@ impl Component<BufferMessage> for BufferContent {
     fn update(&mut self, message: BufferMessage) -> iced::Task<BufferMessage> {
         match message {
             BufferMessage::UpstreamResponse(_) => unreachable!(),
+            BufferMessage::CursorNavigateComamnd(nav) => {
+                match nav {
+                    BufferCursorNavigation::TopOfBuffer => {
+                        self.cursor.row = 0;
+                        self.cursor.col = 0;
+                    }
+                    BufferCursorNavigation::BottomOfBuffer => {
+                        self.cursor.row = self.data.len() - 1;
+                        self.cursor.col = 0;
+                    }
+                    BufferCursorNavigation::BeginningCharOfLine => {
+                        self.cursor.col = 0;
+                        let row = &self.data[self.cursor.row];
+                        while self.cursor.col < row.len()
+                            && &row[self.cursor.col..self.cursor.col + 1] == " "
+                        {
+                            self.cursor.col += 1;
+                        }
+                    }
+                    BufferCursorNavigation::EndCharOfLine => {
+                        let row = &self.data[self.cursor.row];
+                        self.cursor.col = row.len() - 1;
+                        while self.cursor.col > 0
+                            && &row[self.cursor.col..self.cursor.col + 1] == " "
+                        {
+                            self.cursor.col -= 1;
+                        }
+                    }
+                }
+                iced::Task::done(BufferMessage::UpstreamResponse(
+                    UpstreamedPanelMessage::SetStatusLineCursor(self.cursor.clone()),
+                ))
+            }
             BufferMessage::AddCharacter(ascii_code) => {
                 self.add_character(ascii_code);
                 return iced::Task::done(BufferMessage::UpstreamResponse(
@@ -777,6 +869,7 @@ impl BufferContent {
 struct PanelStatusLine {
     bounds: Rectangle,
     current_command: Option<String>,
+    current_shortcut: String,
     mode_string: String,
     cursor: Cursor,
 }
@@ -786,6 +879,7 @@ impl PanelStatusLine {
         PanelStatusLine {
             bounds,
             current_command: None,
+            current_shortcut: String::new(),
             mode_string: String::from("NORMAL"),
             cursor: Cursor { row: 0, col: 0 },
         }
@@ -840,6 +934,7 @@ pub enum PanelStatusLineMessage {
     DisplayMode(PanelMode),
     UpstreamResponse(Option<UpstreamedPanelMessage>),
     SetCursor(Cursor),
+    SetShortcut(String),
 }
 
 impl Component<PanelStatusLineMessage> for PanelStatusLine {
@@ -875,6 +970,10 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
                 }
                 iced::Task::none()
             }
+            PanelStatusLineMessage::SetShortcut(shortcut) => {
+                self.current_shortcut = shortcut;
+                iced::Task::none()
+            }
             PanelStatusLineMessage::RemoveCharacterFromCommand => {
                 if let Some(cmd) = &self.current_command {
                     if cmd.len() > 0 {
@@ -901,7 +1000,7 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
                     PanelMode::Insert => {
                         self.mode_string = String::from("INSERT");
                     }
-                    PanelMode::Normal => {
+                    PanelMode::Normal | PanelMode::ShortcutCommand => {
                         self.mode_string = String::from("NORMAL");
                     }
                     PanelMode::StatusCommand => {}
@@ -921,10 +1020,10 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
             self.bounds.y,
             self.bounds.width,
             self.bounds.height,
-            // TODO: Pass by reference.
-            self.current_command.clone(),
-            self.mode_string.clone(),
+            &self.current_command,
+            &self.mode_string,
             &self.cursor,
+            &self.current_shortcut,
         )
         .into()
     }
@@ -1057,6 +1156,8 @@ struct Panel {
     buffer_source: Option<BufferSource>,
     status_line: PanelStatusLine,
     mode: PanelMode,
+    shortcut_buffer: String,
+    shortcut_initiators: std::collections::HashSet<char>,
 }
 
 #[derive(Clone, Debug, Copy, PartialEq)]
@@ -1064,6 +1165,7 @@ pub enum PanelMode {
     Normal,
     Insert,
     StatusCommand,
+    ShortcutCommand,
 }
 
 #[derive(Clone, Debug)]
@@ -1099,6 +1201,7 @@ pub enum PanelMessage {
     ),
     AttachBufferSource(Option<BufferSource>),
     AtttachContentToBuffer(Result<Vec<String>, FileError>),
+    ShortcutBuffer(char),
     Empty, // does nothing
 }
 
@@ -1120,6 +1223,8 @@ impl Panel {
             status_line: PanelStatusLine::new(status_line_bounds),
             mode: PanelMode::Normal,
             buffer_source: None,
+            shortcut_buffer: String::new(),
+            shortcut_initiators: std::collections::HashSet::from(['g']),
         }
     }
 
@@ -1143,8 +1248,86 @@ impl Panel {
                     _ => None,
                 }
             }
-            PanelMode::Normal => None,
+            PanelMode::Normal | PanelMode::ShortcutCommand => None,
         }
+    }
+
+    fn handle_normal_mode_key(&self, ch: char) -> Option<PanelMessage> {
+        match ch {
+            ':' => {
+                return Some(PanelMessage::ModeTransition(
+                    self.mode,
+                    PanelMode::StatusCommand,
+                    ModeTransitionPayload::Char(':'),
+                ));
+            }
+            'i' => {
+                return Some(PanelMessage::ModeTransition(
+                    self.mode,
+                    PanelMode::Insert,
+                    ModeTransitionPayload::InsertModePayload(CursorAxisMod::HorizontalCursorDelta(
+                        0,
+                    )),
+                ));
+            }
+            'a' => {
+                return Some(PanelMessage::ModeTransition(
+                    self.mode,
+                    PanelMode::Insert,
+                    ModeTransitionPayload::InsertModePayload(CursorAxisMod::HorizontalCursorDelta(
+                        1,
+                    )),
+                ));
+            }
+            'o' => {
+                return Some(PanelMessage::ModeTransition(
+                    self.mode,
+                    PanelMode::Insert,
+                    ModeTransitionPayload::InsertModePayload(CursorAxisMod::InsertRowAndMoveDelta(
+                        1,
+                    )),
+                ));
+            }
+            'O' => {
+                return Some(PanelMessage::ModeTransition(
+                    self.mode,
+                    PanelMode::Insert,
+                    ModeTransitionPayload::InsertModePayload(CursorAxisMod::InsertRowAndMoveDelta(
+                        -1,
+                    )),
+                ));
+            }
+            'h' => {
+                return Some(PanelMessage::ProcessBufferEvent(
+                    BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowLeft),
+                ))
+            }
+            'l' => {
+                return Some(PanelMessage::ProcessBufferEvent(
+                    BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowRight),
+                ))
+            }
+            'j' => {
+                return Some(PanelMessage::ProcessBufferEvent(
+                    BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowDown),
+                ))
+            }
+            'k' => {
+                return Some(PanelMessage::ProcessBufferEvent(
+                    BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowUp),
+                ))
+            }
+            c @ _ => {
+                if self.shortcut_initiators.contains(&c) {
+                    return Some(PanelMessage::ModeTransition(
+                        self.mode,
+                        PanelMode::ShortcutCommand,
+                        ModeTransitionPayload::Char(c),
+                    ));
+                }
+            }
+        }
+        None
     }
 }
 
@@ -1159,72 +1342,19 @@ impl Component<PanelMessage> for Panel {
             iced::keyboard::key::Key::Character(ref ch_str) => {
                 let ch = ch_str.chars().nth(0).unwrap();
                 match self.mode {
-                    PanelMode::Normal => match ch {
-                        ':' => {
+                    PanelMode::Normal => return self.handle_normal_mode_key(ch),
+                    PanelMode::ShortcutCommand => {
+                        if self.shortcut_buffer.len() == 0
+                            && !self.shortcut_initiators.contains(&ch)
+                        {
                             return Some(PanelMessage::ModeTransition(
                                 self.mode,
-                                PanelMode::StatusCommand,
-                                ModeTransitionPayload::Char(':'),
+                                PanelMode::Normal,
+                                ModeTransitionPayload::Char(ch),
                             ));
                         }
-                        'i' => {
-                            return Some(PanelMessage::ModeTransition(
-                                self.mode,
-                                PanelMode::Insert,
-                                ModeTransitionPayload::InsertModePayload(
-                                    CursorAxisMod::HorizontalCursorDelta(0),
-                                ),
-                            ));
-                        }
-                        'a' => {
-                            return Some(PanelMessage::ModeTransition(
-                                self.mode,
-                                PanelMode::Insert,
-                                ModeTransitionPayload::InsertModePayload(
-                                    CursorAxisMod::HorizontalCursorDelta(1),
-                                ),
-                            ));
-                        }
-                        'o' => {
-                            return Some(PanelMessage::ModeTransition(
-                                self.mode,
-                                PanelMode::Insert,
-                                ModeTransitionPayload::InsertModePayload(
-                                    CursorAxisMod::InsertRowAndMoveDelta(1),
-                                ),
-                            ));
-                        }
-                        'O' => {
-                            return Some(PanelMessage::ModeTransition(
-                                self.mode,
-                                PanelMode::Insert,
-                                ModeTransitionPayload::InsertModePayload(
-                                    CursorAxisMod::InsertRowAndMoveDelta(-1),
-                                ),
-                            ));
-                        }
-                        'h' => {
-                            return Some(PanelMessage::ProcessBufferEvent(
-                                BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowLeft),
-                            ))
-                        }
-                        'l' => {
-                            return Some(PanelMessage::ProcessBufferEvent(
-                                BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowRight),
-                            ))
-                        }
-                        'j' => {
-                            return Some(PanelMessage::ProcessBufferEvent(
-                                BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowDown),
-                            ))
-                        }
-                        'k' => {
-                            return Some(PanelMessage::ProcessBufferEvent(
-                                BufferMessage::CommitAction(iced::keyboard::key::Named::ArrowUp),
-                            ))
-                        }
-                        _ => {}
-                    },
+                        return Some(PanelMessage::ShortcutBuffer(ch));
+                    }
                     _ => {}
                 }
             }
@@ -1253,7 +1383,7 @@ impl Component<PanelMessage> for Panel {
             },
             iced::keyboard::key::Key::Named(iced::keyboard::key::Named::Escape) => {
                 match self.mode {
-                    PanelMode::Insert | PanelMode::StatusCommand => {
+                    PanelMode::Insert | PanelMode::StatusCommand | PanelMode::ShortcutCommand => {
                         return Some(PanelMessage::ModeTransition(
                             self.mode,
                             PanelMode::Normal,
@@ -1271,6 +1401,42 @@ impl Component<PanelMessage> for Panel {
     fn update(&mut self, message: PanelMessage) -> iced::Task<PanelMessage> {
         match message {
             PanelMessage::Empty => iced::Task::none(),
+            PanelMessage::ShortcutBuffer(c) => {
+                self.shortcut_buffer += &c.to_string();
+                let mut tasks = vec![iced::Task::done(PanelMessage::ProcessStatusLineEvent(
+                    PanelStatusLineMessage::SetShortcut(self.shortcut_buffer.clone()),
+                ))];
+
+                let max_buffer_size = 2;
+                let mut should_exit_shortcut_mode = false;
+                let nav: Option<BufferCursorNavigation> = match &self.shortcut_buffer[..] {
+                    "gg" => Some(BufferCursorNavigation::TopOfBuffer),
+                    "ge" => Some(BufferCursorNavigation::BottomOfBuffer),
+                    "gs" => Some(BufferCursorNavigation::BeginningCharOfLine),
+                    "gl" => Some(BufferCursorNavigation::EndCharOfLine),
+                    b @ _ => {
+                        if b.len() >= max_buffer_size {
+                            // received unidentified shortcut...
+                            should_exit_shortcut_mode = true;
+                        }
+                        None
+                    }
+                };
+                if let Some(n) = nav {
+                    self.shortcut_buffer = String::new();
+                    tasks.push(iced::Task::done(PanelMessage::ProcessBufferEvent(
+                        BufferMessage::CursorNavigateComamnd(n),
+                    )));
+                } else if should_exit_shortcut_mode {
+                    // Empty the buffer
+                    tasks.push(iced::Task::done(PanelMessage::ModeTransition(
+                        self.mode,
+                        PanelMode::Normal,
+                        ModeTransitionPayload::None,
+                    )));
+                }
+                iced::Task::batch(tasks)
+            }
             PanelMessage::ProcessBufferEvent(buffer_message) => {
                 match buffer_message {
                     BufferMessage::UpstreamResponse(upstream_message) => match upstream_message {
@@ -1363,6 +1529,7 @@ impl Component<PanelMessage> for Panel {
             }
             PanelMessage::ModeTransition(prev_mode, new_mode, transition_payload) => {
                 self.mode = new_mode;
+                self.shortcut_buffer = String::new();
 
                 let mut tasks = vec![iced::Task::done(PanelMessage::ProcessStatusLineEvent(
                     PanelStatusLineMessage::DisplayMode(new_mode),
@@ -1373,11 +1540,15 @@ impl Component<PanelMessage> for Panel {
                             input_buffer,
                         )));
                     }
-                    ModeTransitionPayload::InsertModePayload(payload) => {
-                        tasks.push(iced::Task::done(PanelMessage::ProcessBufferEvent(
-                            BufferMessage::CursorAxisMod(payload),
-                        )));
-                    }
+                    ModeTransitionPayload::InsertModePayload(payload) => match new_mode {
+                        PanelMode::Insert => {
+                            tasks.push(iced::Task::done(PanelMessage::ProcessBufferEvent(
+                                BufferMessage::CursorAxisMod(payload),
+                            )));
+                        }
+                        // As it currently is, InsertModePayload is tightly coupled with PanelMode::Insert.
+                        _ => unreachable!(),
+                    },
                     ModeTransitionPayload::None => {}
                 }
                 if prev_mode == PanelMode::StatusCommand {
@@ -1394,10 +1565,14 @@ impl Component<PanelMessage> for Panel {
                 PanelMode::Insert => iced::Task::done(PanelMessage::ProcessBufferEvent(
                     BufferMessage::AddCharacter(key as u8),
                 )),
-                PanelMode::Normal => iced::Task::none(),
+                PanelMode::Normal => match self.handle_normal_mode_key(key) {
+                    None => iced::Task::none(),
+                    Some(msg) => iced::Task::done(msg),
+                },
                 PanelMode::StatusCommand => iced::Task::done(PanelMessage::ProcessStatusLineEvent(
                     PanelStatusLineMessage::ProcessKeyInput(key),
                 )),
+                PanelMode::ShortcutCommand => iced::Task::done(PanelMessage::ShortcutBuffer(key)),
             },
         }
     }
