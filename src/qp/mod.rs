@@ -136,6 +136,47 @@ where
             Color::WHITE,
             bounds,
         );
+
+        // Right side text
+        {
+            let right_bounds = Rectangle {
+                x: self.x + self.width / 2.0,
+                y: self.y,
+                width: self.width / 2.0,
+                height: self.height,
+            };
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: right_bounds,
+                    ..renderer::Quad::default()
+                },
+                Color::from_rgb(0.2, 0.0, 0.0),
+            );
+
+            let right_text = iced::advanced::Text {
+                content: String::from("00:00"), // TODO: Store the column / rows here
+                bounds: Size {
+                    width: right_bounds.width,
+                    height: GridSpaceUtil::CELL_HEIGHT as f32,
+                },
+                size: iced::Pixels(GridSpaceUtil::TEXT_SIZE as f32),
+                line_height: iced::advanced::text::LineHeight::default(),
+                font: iced::Font::MONOSPACE,
+                horizontal_alignment: iced::Right,
+                vertical_alignment: iced::Top,
+                shaping: iced::advanced::text::Shaping::Basic,
+                wrapping: iced::advanced::text::Wrapping::None,
+            };
+            renderer.fill_text(
+                right_text,
+                iced::Point {
+                    x: self.x + self.width,
+                    y: self.y,
+                },
+                Color::WHITE,
+                right_bounds,
+            );
+        }
     }
 }
 
