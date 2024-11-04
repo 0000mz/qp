@@ -46,10 +46,20 @@ pub struct StatusLineRender {
     height: f32,
     command: Option<String>,
     mode: String,
+    // TODO: Pass by reference instead of value.
+    cursor: Cursor,
 }
 
 impl StatusLineRender {
-    fn new(x: f32, y: f32, width: f32, height: f32, command: Option<String>, mode: String) -> Self {
+    fn new(
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        command: Option<String>,
+        mode: String,
+        cursor: Cursor,
+    ) -> Self {
         StatusLineRender {
             x,
             y,
@@ -57,6 +67,7 @@ impl StatusLineRender {
             height,
             command,
             mode,
+            cursor,
         }
     }
 }
@@ -154,7 +165,7 @@ where
             );
 
             let right_text = iced::advanced::Text {
-                content: String::from("00:00"), // TODO: Store the column / rows here
+                content: self.cursor.row.to_string() + ":" + self.cursor.col.to_string().as_ref(),
                 bounds: Size {
                     width: right_bounds.width,
                     height: GridSpaceUtil::CELL_HEIGHT as f32,
@@ -411,7 +422,7 @@ where
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Cursor {
+pub struct Cursor {
     row: usize,
     col: usize,
 }
@@ -444,6 +455,7 @@ pub enum BufferMessage<AsciiCode = u8> {
     RemoveCharacter,
     CommitAction(iced::keyboard::key::Named),
     CursorAxisMod(CursorAxisMod),
+    UpstreamResponse(UpstreamedPanelMessage),
 }
 
 #[derive(Debug)]
@@ -519,6 +531,7 @@ impl Component<BufferMessage> for BufferContent {
 
     fn update(&mut self, message: BufferMessage) -> iced::Task<BufferMessage> {
         match message {
+            BufferMessage::UpstreamResponse(_) => unreachable!(),
             BufferMessage::AddCharacter(ascii_code) => {
                 println!("-> Adding character: {}", ascii_code);
                 self.ensure_cursor();
@@ -531,7 +544,10 @@ impl Component<BufferMessage> for BufferContent {
                 new_row += right;
 
                 self.data[self.cursor.row] = new_row;
-                self.cursor.col += 1
+                self.cursor.col += 1;
+                return iced::Task::done(BufferMessage::UpstreamResponse(
+                    UpstreamedPanelMessage::SetStatusLineCursor(self.cursor.clone()),
+                ));
             }
             BufferMessage::RemoveCharacter => {
                 let row = &self.data[self.cursor.row];
@@ -565,87 +581,100 @@ impl Component<BufferMessage> for BufferContent {
                     self.cursor.row -= 1;
                     self.cursor.col = self.data[self.cursor.row].len()
                 }
+                return iced::Task::done(BufferMessage::UpstreamResponse(
+                    UpstreamedPanelMessage::SetStatusLineCursor(self.cursor.clone()),
+                ));
             }
-            BufferMessage::CommitAction(action) => match action {
-                iced::keyboard::key::Named::Enter => {
-                    self.ensure_cursor();
-                    let (upper, lower) = self.data.split_at(self.cursor.row + 1);
-
-                    let mut new_data = Vec::from(upper);
-
-                    // Split the current row at the column point and move the data to the right of cursor
-                    // to the next line.
-                    let new_line: String = {
-                        let (left, right) = upper[upper.len() - 1].split_at(self.cursor.col);
-                        let last_i = new_data.len() - 1;
-                        new_data[last_i] = String::from(&left[..]);
-                        String::from(&right[..])
-                    };
-
-                    new_data.push(new_line);
-                    new_data.append(&mut Vec::from(lower));
-
-                    self.data = new_data;
-                    self.cursor.row += 1;
-                    self.cursor.col = 0;
-                }
-                iced::keyboard::key::Named::ArrowLeft => {
-                    if self.cursor.col > 0 {
-                        self.cursor.col = std::cmp::max(0, self.cursor.col - 1);
-                    }
-                }
-                iced::keyboard::key::Named::ArrowRight => {
-                    self.cursor.col =
-                        std::cmp::min(self.data[self.cursor.row].len(), self.cursor.col + 1);
-                }
-                iced::keyboard::key::Named::ArrowUp => {
-                    if self.cursor.row > 0 {
-                        self.cursor.row = std::cmp::max(0, self.cursor.row - 1);
-                        let max_col = self.data[self.cursor.row].len();
-                        self.cursor.col = std::cmp::min(max_col, self.cursor.col);
-                    }
-                }
-                iced::keyboard::key::Named::ArrowDown => {
-                    self.cursor.row = std::cmp::min(self.data.len() - 1, self.cursor.row + 1);
-                    let max_col = self.data[self.cursor.row].len();
-                    self.cursor.col = std::cmp::min(max_col, self.cursor.col);
-                }
-                _ => {}
-            },
-            BufferMessage::CursorAxisMod(modfier) => match modfier {
-                CursorAxisMod::HorizontalCursorDelta(delta) => {
-                    let new_col = (self.cursor.col as i32) + delta;
-                    if new_col >= 0 {
-                        let new_col = new_col as usize;
-                        self.cursor.col = std::cmp::min(new_col, self.data[self.cursor.row].len());
-                    }
-                }
-                CursorAxisMod::InsertRowAndMoveDelta(delta) => {
-                    if delta == 1 {
+            BufferMessage::CommitAction(action) => {
+                match action {
+                    iced::keyboard::key::Named::Enter => {
+                        self.ensure_cursor();
                         let (upper, lower) = self.data.split_at(self.cursor.row + 1);
+
                         let mut new_data = Vec::from(upper);
-                        new_data.push(String::new());
+
+                        // Split the current row at the column point and move the data to the right of cursor
+                        // to the next line.
+                        let new_line: String = {
+                            let (left, right) = upper[upper.len() - 1].split_at(self.cursor.col);
+                            let last_i = new_data.len() - 1;
+                            new_data[last_i] = String::from(&left[..]);
+                            String::from(&right[..])
+                        };
+
+                        new_data.push(new_line);
                         new_data.append(&mut Vec::from(lower));
 
                         self.data = new_data;
                         self.cursor.row += 1;
                         self.cursor.col = 0;
-                    } else if delta == -1 {
-                        let (upper, lower) = self.data.split_at(self.cursor.row);
-                        let mut new_data = Vec::from(upper);
-                        new_data.push(String::new());
-                        new_data.append(&mut Vec::from(lower));
+                    }
+                    iced::keyboard::key::Named::ArrowLeft => {
+                        if self.cursor.col > 0 {
+                            self.cursor.col = std::cmp::max(0, self.cursor.col - 1);
+                        }
+                    }
+                    iced::keyboard::key::Named::ArrowRight => {
+                        self.cursor.col =
+                            std::cmp::min(self.data[self.cursor.row].len(), self.cursor.col + 1);
+                    }
+                    iced::keyboard::key::Named::ArrowUp => {
+                        if self.cursor.row > 0 {
+                            self.cursor.row = std::cmp::max(0, self.cursor.row - 1);
+                            let max_col = self.data[self.cursor.row].len();
+                            self.cursor.col = std::cmp::min(max_col, self.cursor.col);
+                        }
+                    }
+                    iced::keyboard::key::Named::ArrowDown => {
+                        self.cursor.row = std::cmp::min(self.data.len() - 1, self.cursor.row + 1);
+                        let max_col = self.data[self.cursor.row].len();
+                        self.cursor.col = std::cmp::min(max_col, self.cursor.col);
+                    }
+                    _ => {}
+                }
+                return iced::Task::done(BufferMessage::UpstreamResponse(
+                    UpstreamedPanelMessage::SetStatusLineCursor(self.cursor.clone()),
+                ));
+            }
+            BufferMessage::CursorAxisMod(modfier) => {
+                match modfier {
+                    CursorAxisMod::HorizontalCursorDelta(delta) => {
+                        let new_col = (self.cursor.col as i32) + delta;
+                        if new_col >= 0 {
+                            let new_col = new_col as usize;
+                            self.cursor.col =
+                                std::cmp::min(new_col, self.data[self.cursor.row].len());
+                        }
+                    }
+                    CursorAxisMod::InsertRowAndMoveDelta(delta) => {
+                        if delta == 1 {
+                            let (upper, lower) = self.data.split_at(self.cursor.row + 1);
+                            let mut new_data = Vec::from(upper);
+                            new_data.push(String::new());
+                            new_data.append(&mut Vec::from(lower));
 
-                        self.data = new_data;
-                        // cursor should stay in same position. The inserted row should account for the delta.
-                        self.cursor.col = 0;
-                    } else {
-                        panic!("Non-singular delta for CursorAxisMod::InsertRowAndMoveDelta not implemented.");
+                            self.data = new_data;
+                            self.cursor.row += 1;
+                            self.cursor.col = 0;
+                        } else if delta == -1 {
+                            let (upper, lower) = self.data.split_at(self.cursor.row);
+                            let mut new_data = Vec::from(upper);
+                            new_data.push(String::new());
+                            new_data.append(&mut Vec::from(lower));
+
+                            self.data = new_data;
+                            // cursor should stay in same position. The inserted row should account for the delta.
+                            self.cursor.col = 0;
+                        } else {
+                            panic!("Non-singular delta for CursorAxisMod::InsertRowAndMoveDelta not implemented.");
+                        }
                     }
                 }
-            },
+                return iced::Task::done(BufferMessage::UpstreamResponse(
+                    UpstreamedPanelMessage::SetStatusLineCursor(self.cursor.clone()),
+                ));
+            }
         }
-        iced::Task::none()
     }
 
     fn view(&self) -> iced::Element<'_, EditorMessage> {
@@ -742,6 +771,7 @@ struct PanelStatusLine {
     bounds: Rectangle,
     current_command: Option<String>,
     mode_string: String,
+    cursor: Cursor,
 }
 
 impl PanelStatusLine {
@@ -750,6 +780,7 @@ impl PanelStatusLine {
             bounds,
             current_command: None,
             mode_string: String::from("NORMAL"),
+            cursor: Cursor { row: 0, col: 0 },
         }
     }
 
@@ -801,6 +832,7 @@ pub enum PanelStatusLineMessage {
     HandleCurrentAction(CurrentActionHandelingMode),
     DisplayMode(PanelMode),
     UpstreamResponse(Option<UpstreamedPanelMessage>),
+    SetCursor(Cursor),
 }
 
 impl Component<PanelStatusLineMessage> for PanelStatusLine {
@@ -869,6 +901,10 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
                 }
                 iced::Task::none()
             }
+            PanelStatusLineMessage::SetCursor(cursor) => {
+                self.cursor = cursor;
+                iced::Task::none()
+            }
         }
     }
 
@@ -881,6 +917,7 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
             // TODO: Pass by reference.
             self.current_command.clone(),
             self.mode_string.clone(),
+            self.cursor.clone(),
         )
         .into()
     }
@@ -1033,6 +1070,7 @@ pub enum PanelCommand {
 #[derive(Debug, Clone)]
 pub enum UpstreamedPanelMessage {
     ExecuteCommand(PanelCommand),
+    SetStatusLineCursor(Cursor),
 }
 
 #[derive(Debug, Clone)]
@@ -1226,10 +1264,22 @@ impl Component<PanelMessage> for Panel {
     fn update(&mut self, message: PanelMessage) -> iced::Task<PanelMessage> {
         match message {
             PanelMessage::Empty => iced::Task::none(),
-            PanelMessage::ProcessBufferEvent(buffer_message) => self
-                .buffer
-                .update(buffer_message)
-                .map(|panel_response| PanelMessage::ProcessBufferEvent(panel_response)),
+            PanelMessage::ProcessBufferEvent(buffer_message) => {
+                match buffer_message {
+                    BufferMessage::UpstreamResponse(upstream_message) => match upstream_message {
+                        UpstreamedPanelMessage::ExecuteCommand(_) => unreachable!(),
+                        UpstreamedPanelMessage::SetStatusLineCursor(cursor) => {
+                            return iced::Task::done(PanelMessage::ProcessStatusLineEvent(
+                                PanelStatusLineMessage::SetCursor(cursor),
+                            ))
+                        }
+                    },
+                    _ => {}
+                }
+                self.buffer
+                    .update(buffer_message)
+                    .map(|panel_response| PanelMessage::ProcessBufferEvent(panel_response))
+            }
             PanelMessage::ProcessStatusLineEvent(status_message) => match status_message {
                 PanelStatusLineMessage::UpstreamResponse(None) => {
                     iced::Task::done(PanelMessage::ModeTransition(
@@ -1245,6 +1295,7 @@ impl Component<PanelMessage> for Panel {
                         ModeTransitionPayload::None,
                     ))];
                     match upstream_message {
+                        UpstreamedPanelMessage::SetStatusLineCursor(_) => unreachable!(),
                         UpstreamedPanelMessage::ExecuteCommand(command) => match command {
                             PanelCommand::OpenFile(None) => {}
                             PanelCommand::OpenFile(Some(file)) => {
