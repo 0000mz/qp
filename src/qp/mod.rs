@@ -26,7 +26,7 @@ trait Component<Message> {
     fn view(&self) -> iced::Element<'_, EditorMessage>;
 }
 
-struct GridSpaceUtil {}
+struct GridSpaceUtil;
 impl GridSpaceUtil {
     const CELL_WIDTH: usize = 10;
     const CELL_HEIGHT: usize = 14;
@@ -452,6 +452,7 @@ pub enum CursorAxisMod {
 #[derive(Debug, Clone)]
 pub enum BufferMessage<AsciiCode = u8> {
     AddCharacter(AsciiCode),
+    AddCharacters(Vec<AsciiCode>),
     RemoveCharacter,
     CommitAction(iced::keyboard::key::Named),
     CursorAxisMod(CursorAxisMod),
@@ -533,18 +534,15 @@ impl Component<BufferMessage> for BufferContent {
         match message {
             BufferMessage::UpstreamResponse(_) => unreachable!(),
             BufferMessage::AddCharacter(ascii_code) => {
-                println!("-> Adding character: {}", ascii_code);
-                self.ensure_cursor();
-
-                let row = &self.data[self.cursor.row];
-                let (left, right) = row.split_at(self.cursor.col);
-
-                let mut new_row = String::from(left);
-                new_row.push(ascii_code as char);
-                new_row += right;
-
-                self.data[self.cursor.row] = new_row;
-                self.cursor.col += 1;
+                self.add_character(ascii_code);
+                return iced::Task::done(BufferMessage::UpstreamResponse(
+                    UpstreamedPanelMessage::SetStatusLineCursor(self.cursor.clone()),
+                ));
+            }
+            BufferMessage::AddCharacters(chars) => {
+                for ascii_code in chars {
+                    self.add_character(ascii_code);
+                }
                 return iced::Task::done(BufferMessage::UpstreamResponse(
                     UpstreamedPanelMessage::SetStatusLineCursor(self.cursor.clone()),
                 ));
@@ -708,6 +706,21 @@ impl BufferContent {
         line.chars().nth(col)
     }
 
+    fn add_character(&mut self, ascii_code: u8) {
+        println!("-> Adding character: {}", ascii_code);
+        self.ensure_cursor();
+
+        let row = &self.data[self.cursor.row];
+        let (left, right) = row.split_at(self.cursor.col);
+
+        let mut new_row = String::from(left);
+        new_row.push(ascii_code as char);
+        new_row += right;
+
+        self.data[self.cursor.row] = new_row;
+        self.cursor.col += 1;
+    }
+
     fn ensure_cursor(&mut self) {
         if self.data.len() == 0 {
             self.data.push(String::new());
@@ -758,6 +771,10 @@ impl BufferContent {
                     }
                     iced::keyboard::key::Named::Space => {
                         Some(BufferMessage::AddCharacter(' ' as u8))
+                    }
+                    iced::keyboard::key::Named::Tab => {
+                        // Tab resolves to 2 spaces, personal preference :). If it matters, allow this to be configured somewhere.
+                        Some(BufferMessage::AddCharacters(vec![' ' as u8, ' ' as u8]))
                     }
                     _ => None,
                 }
