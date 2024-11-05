@@ -621,6 +621,7 @@ pub enum CursorAxisMod {
     // Insert a new row `row_delta` away from the current row and move the cursor
     // to that newly inserted row.
     InsertRowAndMoveDelta(i32 /* row_delta */),
+    EndOfLine,
 }
 
 #[derive(Debug, Clone)]
@@ -885,6 +886,9 @@ impl Component<BufferMessage> for BufferContent {
                         } else {
                             panic!("Non-singular delta for CursorAxisMod::InsertRowAndMoveDelta not implemented.");
                         }
+                    }
+                    CursorAxisMod::EndOfLine => {
+                        self.cursor.col = self.data[self.cursor.row].len();
                     }
                 }
                 return iced::Task::done(BufferMessage::UpstreamResponse(
@@ -1404,7 +1408,7 @@ impl Panel {
             mode: PanelMode::Normal,
             buffer_source: None,
             shortcut_buffer: String::new(),
-            shortcut_initiators: std::collections::HashSet::from(['g']),
+            shortcut_initiators: std::collections::HashSet::from(['g', 'A']),
         }
     }
 
@@ -1589,11 +1593,28 @@ impl Component<PanelMessage> for Panel {
 
                 let max_buffer_size = 2;
                 let mut should_exit_shortcut_mode = false;
-                let nav: Option<BufferCursorNavigation> = match &self.shortcut_buffer[..] {
-                    "gg" => Some(BufferCursorNavigation::TopOfBuffer),
-                    "ge" => Some(BufferCursorNavigation::BottomOfBuffer),
-                    "gs" => Some(BufferCursorNavigation::BeginningCharOfLine),
-                    "gl" => Some(BufferCursorNavigation::EndCharOfLine),
+                let nav: Option<PanelMessage> = match &self.shortcut_buffer[..] {
+                    "gg" => Some(PanelMessage::ProcessBufferEvent(
+                        BufferMessage::CursorNavigateComamnd(BufferCursorNavigation::TopOfBuffer),
+                    )),
+                    "ge" => Some(PanelMessage::ProcessBufferEvent(
+                        BufferMessage::CursorNavigateComamnd(
+                            BufferCursorNavigation::BottomOfBuffer,
+                        ),
+                    )),
+                    "gs" => Some(PanelMessage::ProcessBufferEvent(
+                        BufferMessage::CursorNavigateComamnd(
+                            BufferCursorNavigation::BeginningCharOfLine,
+                        ),
+                    )),
+                    "gl" => Some(PanelMessage::ProcessBufferEvent(
+                        BufferMessage::CursorNavigateComamnd(BufferCursorNavigation::EndCharOfLine),
+                    )),
+                    "A" => Some(PanelMessage::ModeTransition(
+                        self.mode,
+                        PanelMode::Insert,
+                        ModeTransitionPayload::InsertModePayload(CursorAxisMod::EndOfLine),
+                    )),
                     b @ _ => {
                         if b.len() >= max_buffer_size {
                             // received unidentified shortcut...
@@ -1602,11 +1623,9 @@ impl Component<PanelMessage> for Panel {
                         None
                     }
                 };
-                if let Some(n) = nav {
+                if let Some(msg) = nav {
                     self.shortcut_buffer = String::new();
-                    tasks.push(iced::Task::done(PanelMessage::ProcessBufferEvent(
-                        BufferMessage::CursorNavigateComamnd(n),
-                    )));
+                    tasks.push(iced::Task::done(msg));
                 } else if should_exit_shortcut_mode {
                     // Empty the buffer
                     tasks.push(iced::Task::done(PanelMessage::ModeTransition(
