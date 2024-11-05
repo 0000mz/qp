@@ -739,7 +739,9 @@ impl Component<BufferMessage> for BufferContent {
                     }
                     BufferCursorNavigation::EndCharOfLine => {
                         let row = &self.data[self.cursor.row];
-                        self.cursor.col = row.len() - 1;
+                        // If the row is empty, just leave the cursor in the beginning.
+                        // Otherwise, set it on the last element in the row, not after the row.
+                        self.cursor.col = if row.len() == 0 { 0 } else { row.len() - 1 };
                         while self.cursor.col > 0
                             && &row[self.cursor.col..self.cursor.col + 1] == " "
                         {
