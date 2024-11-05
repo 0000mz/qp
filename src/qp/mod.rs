@@ -248,25 +248,27 @@ where
     }
 }
 
-pub struct TabLineRenderer {
+pub struct TabLineRenderer<'a> {
     x: f32,
     y: f32,
     width: f32,
     height: f32,
+    tabname: &'a String,
 }
 
-impl TabLineRenderer {
-    fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+impl<'a> TabLineRenderer<'a> {
+    fn new(x: f32, y: f32, width: f32, height: f32, tabname: &'a String) -> Self {
         TabLineRenderer {
             x,
             y,
             width,
             height,
+            tabname,
         }
     }
 }
 
-impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for TabLineRenderer
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for TabLineRenderer<'_>
 where
     Renderer: renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font>,
 {
@@ -328,7 +330,7 @@ where
         );
 
         let text = iced::advanced::Text {
-            content: String::from("Tab name"),
+            content: self.tabname.clone(),
             bounds: Size {
                 width: tab_bounds.width,
                 height: tab_bounds.height,
@@ -353,11 +355,12 @@ where
     }
 }
 
-impl<'a, Message, Theme, Renderer> From<TabLineRenderer> for Element<'a, Message, Theme, Renderer>
+impl<'a, Message, Theme, Renderer> From<TabLineRenderer<'a>>
+    for Element<'a, Message, Theme, Renderer>
 where
     Renderer: renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font>,
 {
-    fn from(el: TabLineRenderer) -> Self {
+    fn from(el: TabLineRenderer<'a>) -> Self {
         Self::new(el)
     }
 }
@@ -1287,14 +1290,20 @@ impl BufferSource {
 
 struct TabLine {
     bounds: Rectangle,
+    tabname: String,
 }
 
 #[derive(Debug, Clone)]
-enum TabLineMessage {}
+pub enum TabLineMessage {
+    SetTabName(String),
+}
 
 impl TabLine {
     fn new(bounds: Rectangle) -> Self {
-        TabLine { bounds }
+        TabLine {
+            bounds,
+            tabname: String::from("<unnamed>"),
+        }
     }
 }
 
@@ -1308,7 +1317,12 @@ impl Component<TabLineMessage> for TabLine {
         None
     }
 
-    fn update(&mut self, _message: TabLineMessage) -> iced::Task<TabLineMessage> {
+    fn update(&mut self, message: TabLineMessage) -> iced::Task<TabLineMessage> {
+        match message {
+            TabLineMessage::SetTabName(tabname) => {
+                self.tabname = tabname;
+            }
+        }
         iced::Task::none()
     }
 
@@ -1318,6 +1332,7 @@ impl Component<TabLineMessage> for TabLine {
             self.bounds.y,
             self.bounds.width,
             self.bounds.height,
+            &self.tabname,
         )
         .into()
     }
@@ -1367,6 +1382,7 @@ pub enum PanelMessage {
     ProcessKeyInput(char),
     ProcessBufferEvent(BufferMessage),
     ProcessStatusLineEvent(PanelStatusLineMessage),
+    ProcessTabLineEvent(TabLineMessage),
     ModeTransition(
         PanelMode, /* prev mode */
         PanelMode, /* new mode */
@@ -1697,6 +1713,10 @@ impl Component<PanelMessage> for Panel {
                     .update(status_message)
                     .map(|response| PanelMessage::ProcessStatusLineEvent(response)),
             },
+            PanelMessage::ProcessTabLineEvent(tab_message) => self
+                .tab_line
+                .update(tab_message)
+                .map(|response| PanelMessage::ProcessTabLineEvent(response)),
             PanelMessage::AttachBufferSource(buffer_source) => {
                 match buffer_source {
                     None => {
@@ -1705,11 +1725,22 @@ impl Component<PanelMessage> for Panel {
                     Some(buffersrc) => {
                         println!("Attached a buffersrc to the panel.");
                         let filepath = buffersrc.filepath.clone();
+
+                        let tab_name = if let Some(s) = filepath.to_str() {
+                            String::from(s)
+                        } else {
+                            String::from("unknown")
+                        };
                         self.buffer_source = Some(buffersrc);
-                        return iced::Task::perform(
-                            read_file(filepath),
-                            PanelMessage::AtttachContentToBuffer,
-                        );
+                        return iced::Task::batch(vec![
+                            iced::Task::perform(
+                                read_file(filepath),
+                                PanelMessage::AtttachContentToBuffer,
+                            ),
+                            iced::Task::done(PanelMessage::ProcessTabLineEvent(
+                                TabLineMessage::SetTabName(tab_name),
+                            )),
+                        ]);
                     }
                 }
                 iced::Task::none()
