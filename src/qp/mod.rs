@@ -308,6 +308,48 @@ where
             },
             Color::from_rgb(0.0, 0.2, 0.2),
         );
+
+        let tab_bounds = Rectangle {
+            x: self.x,
+            y: self.y,
+            width: if self.width < 200.0 {
+                self.width
+            } else {
+                200.0
+            },
+            height: self.height,
+        };
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: tab_bounds,
+                ..renderer::Quad::default()
+            },
+            Color::from_rgb(0.0, 0.4, 0.4),
+        );
+
+        let text = iced::advanced::Text {
+            content: String::from("Tab name"),
+            bounds: Size {
+                width: tab_bounds.width,
+                height: tab_bounds.height,
+            },
+            size: iced::Pixels(GridSpaceUtil::TEXT_SIZE as f32),
+            line_height: iced::advanced::text::LineHeight::default(),
+            font: iced::Font::MONOSPACE,
+            horizontal_alignment: iced::Left,
+            vertical_alignment: iced::Center.into(),
+            shaping: iced::advanced::text::Shaping::Basic,
+            wrapping: iced::advanced::text::Wrapping::None,
+        };
+        renderer.fill_text(
+            text,
+            iced::Point {
+                x: tab_bounds.x,
+                y: tab_bounds.y + tab_bounds.height / 2.0,
+            },
+            Color::WHITE,
+            tab_bounds,
+        );
     }
 }
 
