@@ -1403,7 +1403,7 @@ pub enum PanelMessage {
         ModeTransitionPayload,
     ),
     AttachBufferSource(Option<BufferSource>),
-    AtttachContentToBuffer(Result<Vec<String>, FileError>),
+    AttachContentToBuffer(Result<Vec<String>, FileError>),
     ShortcutBuffer(char),
     UpdateBounds(Rectangle),
     Empty, // does nothing
@@ -1776,7 +1776,7 @@ impl Component<PanelMessage> for Panel {
                         return iced::Task::batch(vec![
                             iced::Task::perform(
                                 read_file(filepath),
-                                PanelMessage::AtttachContentToBuffer,
+                                PanelMessage::AttachContentToBuffer,
                             ),
                             iced::Task::done(PanelMessage::ProcessTabLineEvent(
                                 TabLineMessage::SetTabName(tab_name),
@@ -1786,7 +1786,7 @@ impl Component<PanelMessage> for Panel {
                 }
                 iced::Task::none()
             }
-            PanelMessage::AtttachContentToBuffer(content) => {
+            PanelMessage::AttachContentToBuffer(content) => {
                 match content {
                     Err(e) => {
                         println!("Failed to get content: {:?}", e);
