@@ -646,6 +646,7 @@ pub enum BufferMessage<AsciiCode = u8> {
     CursorAxisMod(CursorAxisMod),
     UpstreamResponse(UpstreamedPanelMessage),
     CursorNavigateComamnd(BufferCursorNavigation),
+    UpdateBounds(Rectangle),
 }
 
 #[derive(Debug)]
@@ -722,6 +723,10 @@ impl Component<BufferMessage> for BufferContent {
     fn update(&mut self, message: BufferMessage) -> iced::Task<BufferMessage> {
         match message {
             BufferMessage::UpstreamResponse(_) => unreachable!(),
+            BufferMessage::UpdateBounds(bounds) => {
+                self.bounds = bounds;
+                iced::Task::none()
+            }
             BufferMessage::CursorNavigateComamnd(nav) => {
                 match nav {
                     BufferCursorNavigation::TopOfBuffer => {
@@ -1072,6 +1077,7 @@ pub enum PanelStatusLineMessage {
     UpstreamResponse(Option<UpstreamedPanelMessage>),
     SetCursor(Cursor),
     SetShortcut(String),
+    UpdateBounds(Rectangle),
 }
 
 impl Component<PanelStatusLineMessage> for PanelStatusLine {
@@ -1099,6 +1105,10 @@ impl Component<PanelStatusLineMessage> for PanelStatusLine {
     fn update(&mut self, message: PanelStatusLineMessage) -> iced::Task<PanelStatusLineMessage> {
         match message {
             PanelStatusLineMessage::UpstreamResponse(_) => unreachable!(),
+            PanelStatusLineMessage::UpdateBounds(bounds) => {
+                self.bounds = bounds;
+                iced::Task::none()
+            }
             PanelStatusLineMessage::ProcessKeyInput(c) => {
                 if self.current_command.is_none() {
                     self.current_command = Some(String::new());
@@ -1296,6 +1306,7 @@ struct TabLine {
 #[derive(Debug, Clone)]
 pub enum TabLineMessage {
     SetTabName(String),
+    UpdateBounds(Rectangle),
 }
 
 impl TabLine {
@@ -1321,6 +1332,9 @@ impl Component<TabLineMessage> for TabLine {
         match message {
             TabLineMessage::SetTabName(tabname) => {
                 self.tabname = tabname;
+            }
+            TabLineMessage::UpdateBounds(bounds) => {
+                self.bounds = bounds;
             }
         }
         iced::Task::none()
@@ -1391,32 +1405,14 @@ pub enum PanelMessage {
     AttachBufferSource(Option<BufferSource>),
     AtttachContentToBuffer(Result<Vec<String>, FileError>),
     ShortcutBuffer(char),
+    UpdateBounds(Rectangle),
     Empty, // does nothing
 }
 
 impl Panel {
-    fn new(size: iced::Size) -> Self {
-        let status_line_height = 20.0;
-        let tab_line_height = 20.0;
-
-        let tab_line_bounds = Rectangle {
-            x: 0.0,
-            y: 0.0,
-            width: size.width,
-            height: tab_line_height,
-        };
-        let buffer_bounds = Rectangle {
-            x: 0.0,
-            y: tab_line_bounds.height,
-            width: size.width,
-            height: size.height - status_line_height - tab_line_height,
-        };
-        let status_line_bounds = Rectangle {
-            x: 0.0,
-            y: tab_line_bounds.height + buffer_bounds.height,
-            width: size.width,
-            height: status_line_height,
-        };
+    fn new(bounds: Rectangle) -> Self {
+        let (tab_line_bounds, buffer_bounds, status_line_bounds) =
+            Self::generate_component_bounds(bounds);
         Panel {
             buffer: BufferContent::new(buffer_bounds),
             status_line: PanelStatusLine::new(status_line_bounds),
@@ -1426,6 +1422,36 @@ impl Panel {
             shortcut_buffer: String::new(),
             shortcut_initiators: std::collections::HashSet::from(['g', 'A']),
         }
+    }
+
+    fn generate_component_bounds(
+        panel_bounds: Rectangle,
+    ) -> (
+        Rectangle, /* tab */
+        Rectangle, /* buffer */
+        Rectangle, /* status */
+    ) {
+        let status_line_height = 20.0;
+        let tab_line_height = 20.0;
+        let tab_line_bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: panel_bounds.width,
+            height: tab_line_height,
+        };
+        let buffer_bounds = Rectangle {
+            x: 0.0,
+            y: tab_line_bounds.height,
+            width: panel_bounds.width,
+            height: panel_bounds.height - status_line_height - tab_line_height,
+        };
+        let status_line_bounds = Rectangle {
+            x: 0.0,
+            y: tab_line_bounds.height + buffer_bounds.height,
+            width: panel_bounds.width,
+            height: status_line_height,
+        };
+        (tab_line_bounds, buffer_bounds, status_line_bounds)
     }
 
     fn handle_mode_selected_key_event(
@@ -1601,6 +1627,21 @@ impl Component<PanelMessage> for Panel {
     fn update(&mut self, message: PanelMessage) -> iced::Task<PanelMessage> {
         match message {
             PanelMessage::Empty => iced::Task::none(),
+            PanelMessage::UpdateBounds(bounds) => {
+                let (tab_line_bounds, buffer_bounds, status_line_bounds) =
+                    Self::generate_component_bounds(bounds);
+                iced::Task::batch(vec![
+                    iced::Task::done(PanelMessage::ProcessTabLineEvent(
+                        TabLineMessage::UpdateBounds(tab_line_bounds),
+                    )),
+                    iced::Task::done(PanelMessage::ProcessBufferEvent(
+                        BufferMessage::UpdateBounds(buffer_bounds),
+                    )),
+                    iced::Task::done(PanelMessage::ProcessStatusLineEvent(
+                        PanelStatusLineMessage::UpdateBounds(status_line_bounds),
+                    )),
+                ])
+            }
             PanelMessage::ShortcutBuffer(c) => {
                 self.shortcut_buffer += &c.to_string();
                 let mut tasks = vec![iced::Task::done(PanelMessage::ProcessStatusLineEvent(
@@ -1823,6 +1864,7 @@ pub enum EditorMessage<Key = iced::keyboard::Key, Modifier = iced::keyboard::Mod
     OpenPanel(iced::Size),
     HandleKeys(Key, Key, Modifier),
     ProcessPanelEvent(PanelMessage),
+    ResizeWindow(iced::Size),
 }
 
 pub struct EditorApp {
@@ -1847,15 +1889,31 @@ impl EditorApp {
     }
 
     pub fn subscription(&self) -> iced::Subscription<EditorMessage> {
-        iced::keyboard::on_key_press_ext(|key, modified_key, modifiers| {
-            Some(EditorMessage::HandleKeys(key, modified_key, modifiers))
-        })
+        iced::Subscription::batch([
+            iced::keyboard::on_key_press_ext(|key, modified_key, modifiers| {
+                Some(EditorMessage::HandleKeys(key, modified_key, modifiers))
+            }),
+            iced::window::resize_events().map(|(_, size)| EditorMessage::ResizeWindow(size)),
+        ])
     }
 
     pub fn update(&mut self, message: EditorMessage) -> iced::Task<EditorMessage> {
         match message {
+            EditorMessage::ResizeWindow(size) => iced::Task::done(
+                EditorMessage::ProcessPanelEvent(PanelMessage::UpdateBounds(Rectangle {
+                    x: 0.0,
+                    y: 0.0,
+                    width: size.width,
+                    height: size.height,
+                })),
+            ),
             EditorMessage::OpenPanel(size) => {
-                self.panels.push(Panel::new(size));
+                self.panels.push(Panel::new(Rectangle {
+                    x: 0.0,
+                    y: 0.0,
+                    width: size.width,
+                    height: size.height,
+                }));
                 if let None = self.active_panel {
                     self.active_panel = Some(self.panels.len() - 1);
                 }
